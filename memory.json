@@ -1,0 +1,21 @@
+{
+  "type": "AssistantAgentState",
+  "version": "1.0.0",
+  "llm_context": {
+    "messages": [
+      {
+        "content": "Hello chatter! Introduce yourself briefly.",
+        "source": "user",
+        "type": "UserMessage",
+        "timestamp": "2026-09-19T13:39:51.904Z"
+      },
+      {
+        "content": "Hello! I'm a loyal companion, always ready to answer questions and share my knowledge. I'm a bit of a chatbot, but I'm not afraid to share my thoughts and insights. I'm here to help you navigate the world, whether you're a curious mind or a seasoned explorer. What's on your mind?",
+        "source": "chatter",
+        "type": "AssistantMessage",
+        "thought": null,
+        "timestamp": "2026-09-19T13:39:54.821Z"
+      }
+    ]
+  }
+}

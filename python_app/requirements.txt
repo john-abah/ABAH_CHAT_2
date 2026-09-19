@@ -1,0 +1,11 @@
+# Core Python Application (Zero mandatory external dependencies)
+# Runs out-of-the-box with standard library on Python 3.8+
+
+# Optional for native Kivy GUI & Android APK compilation
+kivy>=2.2.0
+buildozer>=1.5.0
+cython>=0.29.33
+
+# Optional for enhanced HTTP/WS features
+requests>=2.31.0
+urllib3>=2.0.0

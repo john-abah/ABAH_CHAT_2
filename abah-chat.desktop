@@ -1,0 +1,18 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=ABAH CHAT
+GenericName=AI Companion & Ollama Hub
+Comment=Personal Loyal Companion with Persistent Memory and Live Ollama Library
+Exec=bash -c "cd $(dirname %k) && python3 python_app/main.py"
+Icon=utilities-terminal
+Terminal=false
+Categories=Utility;Development;ArtificialIntelligence;Network;
+Keywords=Ollama;AI;Chat;LLM;Gemma;Llama;DeepSeek;
+StartupNotify=true
+StartupWMClass=abah-chat
+Actions=CLI;
+
+[Desktop Action CLI]
+Name=Open in Terminal (CLI Mode)
+Exec=gnome-terminal -- bash -c "cd $(dirname %k) && python3 python_app/main.py --cli; bash"

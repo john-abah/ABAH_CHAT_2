@@ -1,0 +1,14 @@
+[
+  {
+    "id": "gemma2:2b",
+    "name": "Gemma 2 2B",
+    "baseModelId": "gemma2",
+    "tag": "2b",
+    "parameterSize": "2.6B",
+    "size": "1.6 GB",
+    "description": "Google's ultra-efficient 2B model. Default model profile in original ABAH_CHAT companion.",
+    "pulledAt": "2026-09-19T13:39:37.646Z",
+    "status": "ready",
+    "progress": 100
+  }
+]
