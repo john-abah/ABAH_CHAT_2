@@ -387,7 +387,7 @@ class ABAHRequestHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
-    def send_json(self, data: Any):
+    def send_json(self, data: any):
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.end_headers()
