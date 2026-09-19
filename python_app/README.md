@@ -1,10 +1,11 @@
-# ABAH CHAT - Python Edition (Ubuntu & Android Apps)
+# ABAH_CHAT_2 - Python Edition (Ubuntu & Android Apps)
 
-Personal loyal companion with persistent memory and online Ollama models hub.
+Personal loyal AI companion with persistent memory and live online Ollama models hub.
+Repository: [https://github.com/john-abah/ABAH_CHAT_2](https://github.com/john-abah/ABAH_CHAT_2)
 
 ## 🚀 Quick Run on Ubuntu Linux
 
-ABAH CHAT is written with standard Python 3.8+ and requires **zero external packages** to run out of the box!
+ABAH_CHAT_2 is written with standard Python 3.8+ and requires **zero external packages** to run out of the box!
 
 ### 1. Launch in 1 Step:
 ```bash
@@ -28,9 +29,22 @@ This registers **ABAH CHAT** in the Ubuntu GNOME launcher / Applications menu wi
 
 ## 📱 Android App Installation
 
-You can run ABAH CHAT on Android in two ways:
+You can run ABAH_CHAT_2 on Android in two ways:
 
-### Method A: Build Native Android APK (Buildozer)
+### Method A: Run Directly on Android via Termux
+On your Android phone:
+1. Open **Termux** (available via F-Droid or GitHub).
+2. Clone or copy the project:
+   ```bash
+   pkg update -y && pkg install python git -y
+   git clone https://github.com/john-abah/ABAH_CHAT_2.git
+   cd ABAH_CHAT_2
+   chmod +x android_run.sh
+   ./android_run.sh
+   ```
+3. Termux opens the responsive companion interface in Chrome/Android browser at `http://localhost:8080`.
+
+### Method B: Build Native Android APK (Buildozer)
 Requires Linux/Ubuntu:
 ```bash
 chmod +x build_apk.sh
@@ -42,24 +56,12 @@ Install the APK onto your Android phone:
 adb install -r bin/abahchat-1.0.0-arm64-v8a-debug.apk
 ```
 
-### Method B: Run Directly on Android via Termux
-On your Android phone:
-1. Open **Termux** (available via F-Droid or GitHub).
-2. Clone or copy the project:
-   ```bash
-   pkg install python git -y
-   git clone <repo-url> abah-chat
-   cd abah-chat
-   chmod +x android_run.sh
-   ./android_run.sh
-   ```
-3. Termux opens the responsive companion interface in Chrome/Android browser at `http://localhost:8080`.
-
 ---
 
 ## 🧠 Features & Architecture
 
 - **Ollama Online Library Browser**: Scrapes and searches real-time models directly from `ollama.com/library` (`llama3.2`, `deepseek-r1`, `gemma2`, `qwen2.5`, etc.).
 - **1-Click Pulling**: Automatically sends pull requests to your local/remote Ollama instance (`http://localhost:11434`).
-- **Persistent Memory Engine**: Reads and saves conversational context in `memory.json` using the AssistantAgentState schema.
+- **Persistent Memory Engine**: Reads and saves conversational context in `memory.json` using the `AssistantAgentState` schema.
 - **Cross-Platform**: Desktop (Ubuntu / Linux), Mobile (Android APK & Termux), and Web (Cloud Run / AI Studio).
+

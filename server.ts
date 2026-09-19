@@ -943,6 +943,7 @@ app.post('/api/chat', async (req, res) => {
 app.get('/api/python/files', (req, res) => {
   try {
     const fileList = [
+      { name: 'README.md', path: 'README.md', category: 'Documentation' },
       { name: 'main.py', path: 'python_app/main.py', category: 'Core App' },
       { name: 'ollama_client.py', path: 'python_app/ollama_client.py', category: 'Ollama Client' },
       { name: 'memory.py', path: 'python_app/memory.py', category: 'Memory Engine' },
