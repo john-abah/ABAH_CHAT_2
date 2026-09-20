@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   Search,
   Check,
@@ -21,6 +21,8 @@ import {
   Code,
   Eye,
   Zap,
+  SlidersHorizontal,
+  ChevronDown,
 } from 'lucide-react';
 import {
   OnlineOllamaModel,
@@ -39,26 +41,48 @@ interface OllamaModelPickerProps {
   initialTab?: 'online' | 'pulled';
 }
 
-const CATEGORY_TABS: Array<{ id: string; label: string; icon?: React.ReactNode; family?: OllamaFamily; filter?: (m: OnlineOllamaModel) => boolean }> = [
-  { id: 'all', label: 'All Online Models' },
+const CATEGORY_TABS: Array<{
+  id: string;
+  label: string;
+  icon?: React.ReactNode;
+  family?: OllamaFamily;
+  filter?: (m: OnlineOllamaModel) => boolean;
+}> = [
+  { id: 'all', label: 'All Models' },
   {
     id: 'popular',
     label: 'Popular & Trending',
     icon: <TrendingUp className="w-3.5 h-3.5 text-amber-400" />,
-    filter: (m) => m.pulls.includes('M') || m.id.includes('llama3') || m.id.includes('deepseek') || m.id.includes('gemma2'),
+    filter: (m) =>
+      m.pulls.includes('M') ||
+      m.id.includes('llama3') ||
+      m.id.includes('deepseek') ||
+      m.id.includes('gemma2') ||
+      m.id.includes('qwen2.5'),
   },
   {
     id: 'reasoning',
     label: 'Thinking & Reasoning',
     icon: <Brain className="w-3.5 h-3.5 text-purple-400" />,
-    filter: (m) => m.capabilities.includes('thinking') || m.id.includes('deepseek-r1') || m.id.includes('qwq'),
+    filter: (m) =>
+      m.capabilities.includes('thinking') ||
+      m.id.includes('deepseek-r1') ||
+      m.id.includes('qwq') ||
+      m.id.includes('r1'),
   },
   {
     id: 'compact',
     label: 'Compact & Edge (<4B)',
     icon: <Zap className="w-3.5 h-3.5 text-emerald-400" />,
     filter: (m) =>
-      m.parameters.some((p) => p.includes('0.5') || p.includes('1b') || p.includes('1.5b') || p.includes('2b') || p.includes('3b')) ||
+      m.parameters.some(
+        (p) =>
+          p.includes('0.5') ||
+          p.includes('1b') ||
+          p.includes('1.5b') ||
+          p.includes('2b') ||
+          p.includes('3b')
+      ) ||
       m.family === 'compact' ||
       m.id.includes('2b') ||
       m.id.includes('1b'),
@@ -73,28 +97,53 @@ const CATEGORY_TABS: Array<{ id: string; label: string; icon?: React.ReactNode; 
     id: 'vision',
     label: 'Vision & Multimodal',
     icon: <Eye className="w-3.5 h-3.5 text-pink-400" />,
-    filter: (m) => m.capabilities.includes('vision') || m.id.includes('llava') || m.id.includes('vision'),
+    filter: (m) =>
+      m.capabilities.includes('vision') ||
+      m.id.includes('llava') ||
+      m.id.includes('vision'),
   },
-  { id: 'gemma', label: 'Gemma (Google)', family: 'gemma' },
-  { id: 'llama', label: 'Llama (Meta)', family: 'llama' },
+  { id: 'qwen', label: 'Qwen 2.5', family: 'qwen' },
   { id: 'deepseek', label: 'DeepSeek', family: 'deepseek' },
-  { id: 'qwen', label: 'Qwen', family: 'qwen' },
+  { id: 'gemma', label: 'Gemma 2', family: 'gemma' },
+  { id: 'llama', label: 'Llama 3', family: 'llama' },
   { id: 'mistral', label: 'Mistral', family: 'mistral' },
   { id: 'phi', label: 'Phi-4', family: 'phi' },
 ];
 
-export const QUICK_SIZE_OPTIONS = [
+const SIZE_FILTERS: Array<{ id: string; label: string; test?: (param: string) => boolean }> = [
   { id: 'all', label: 'All Sizes' },
-  { id: '0.5b', label: '0.5B' },
-  { id: '1.5b', label: '1.5B' },
-  { id: '2b', label: '2B' },
-  { id: '3b', label: '3B' },
-  { id: '7b', label: '7B' },
-  { id: '8b', label: '8B' },
-  { id: '12b', label: '12B' },
-  { id: '14b', label: '14B' },
-  { id: '32b', label: '32B' },
-  { id: '70b', label: '70B+' },
+  {
+    id: 'tiny',
+    label: '< 3B (Edge/Mobile)',
+    test: (p) => {
+      const num = parseFloat(p);
+      return !isNaN(num) && num < 3;
+    },
+  },
+  {
+    id: 'standard',
+    label: '7B - 9B (Standard)',
+    test: (p) => {
+      const num = parseFloat(p);
+      return !isNaN(num) && num >= 7 && num <= 9;
+    },
+  },
+  {
+    id: 'medium',
+    label: '12B - 14B (Advanced)',
+    test: (p) => {
+      const num = parseFloat(p);
+      return !isNaN(num) && num >= 12 && num <= 14;
+    },
+  },
+  {
+    id: 'heavy',
+    label: '32B+ (Frontier)',
+    test: (p) => {
+      const num = parseFloat(p);
+      return !isNaN(num) && num >= 32;
+    },
+  },
 ];
 
 export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
@@ -106,7 +155,6 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
   onOpenSettings,
   initialTab = 'online',
 }) => {
-  // Main view toggle: 'online' (Live Ollama Library) or 'pulled' (My Pulled & Local Models)
   const [mainView, setMainView] = useState<'online' | 'pulled'>(initialTab);
   const [onlineModels, setOnlineModels] = useState<OnlineOllamaModel[]>([]);
   const [pulledModels, setPulledModels] = useState<PulledOllamaModel[]>([]);
@@ -114,26 +162,30 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
   const [isLoadingPulled, setIsLoadingPulled] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState('all');
+  const [activeSizeFilter, setActiveSizeFilter] = useState('all');
   const [customModelInput, setCustomModelInput] = useState('');
 
-  // Pulling state tracking
-  const [pullingModels, setPullingModels] = useState<Record<string, { status: string; percent: number }>>({});
-  const [notification, setNotification] = useState<{ text: string; isError?: boolean } | null>(null);
-
-  // Selected tag per model card in online view (e.g. deepseek-r1 -> '8b')
+  // Selected tag per model card (e.g. 'qwen2.5' -> '8b', '14b', etc.)
   const [selectedTags, setSelectedTags] = useState<Record<string, string>>({});
 
-  // Model size filter (Requirement: select model by size)
-  const [sizeFilter, setSizeFilter] = useState<string>('all');
+  // Real-time pulling state tracking: modelTag -> { status, percent, completed, total }
+  const [pullingModels, setPullingModels] = useState<
+    Record<string, { status: string; percent: number; completed?: number; total?: number }>
+  >({});
+  const [notification, setNotification] = useState<{ text: string; isError?: boolean } | null>(
+    null
+  );
 
-  // Confirmation modal when user selects an unpulled model (Requirement: confirm before pull)
-  const [confirmPullModal, setConfirmPullModal] = useState<{
+  // Confirmation Modal: When selecting an unpulled model
+  const [unpulledPrompt, setUnpulledPrompt] = useState<{
     baseModelId: string;
+    modelName: string;
     tag: string;
-    fullModelTag: string;
-    name: string;
-    description?: string;
+    fullTag: string;
   } | null>(null);
+
+  // Confirmation Modal: For deleting a pulled model
+  const [deleteConfirmModel, setDeleteConfirmModel] = useState<string | null>(null);
 
   // Reset or initialize on open
   useEffect(() => {
@@ -144,11 +196,13 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
     }
   }, [isOpen, initialTab]);
 
-  // Load online models from /api/ollama/online
-  const loadOnlineModels = async (query?: string) => {
+  // Load online models
+  const loadOnlineModels = useCallback(async (query?: string) => {
     setIsLoadingOnline(true);
     try {
-      const url = query ? `/api/ollama/online?q=${encodeURIComponent(query)}` : '/api/ollama/online';
+      const url = query
+        ? `/api/ollama/online?q=${encodeURIComponent(query)}`
+        : '/api/ollama/online';
       const res = await fetch(url);
       if (res.ok) {
         const data = await res.json();
@@ -159,10 +213,10 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
     } finally {
       setIsLoadingOnline(false);
     }
-  };
+  }, []);
 
-  // Load pulled models from /api/ollama/pulled
-  const loadPulledModels = async () => {
+  // Load pulled models
+  const loadPulledModels = useCallback(async () => {
     setIsLoadingPulled(true);
     try {
       const res = await fetch('/api/ollama/pulled');
@@ -175,29 +229,36 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
     } finally {
       setIsLoadingPulled(false);
     }
-  };
+  }, []);
 
-  // Debounced search for online models
-  useEffect(() => {
-    if (!isOpen || mainView !== 'online') return;
-    const timer = setTimeout(() => {
-      if (searchQuery.trim().length > 1) {
-        loadOnlineModels(searchQuery);
-      } else if (searchQuery.trim().length === 0) {
-        loadOnlineModels();
-      }
-    }, 350);
-    return () => clearTimeout(timer);
-  }, [searchQuery, isOpen, mainView]);
+  // Check if a model tag is available locally in pulled models
+  const isModelAvailableLocally = useCallback(
+    (fullTag: string): boolean => {
+      const lowerTarget = fullTag.toLowerCase().trim();
+      const baseName = lowerTarget.split(':')[0];
+      const tagName = lowerTarget.includes(':') ? lowerTarget.split(':')[1] : 'latest';
 
-  // Handle pull request for a model
+      return pulledModels.some((p) => {
+        const pLower = p.id.toLowerCase().trim();
+        if (pLower === lowerTarget) return true;
+        if (tagName === 'latest' && pLower === baseName) return true;
+        if (tagName === 'latest' && pLower === `${baseName}:latest`) return true;
+        if (pLower === `${baseName}:${tagName}`) return true;
+        return false;
+      });
+    },
+    [pulledModels]
+  );
+
+  // Trigger Model Pull with Live Loading Bar
   const handlePullModel = async (baseModelId: string, specificTag?: string) => {
     const chosenTag = specificTag || selectedTags[baseModelId] || 'latest';
     const fullModelTag = chosenTag !== 'latest' ? `${baseModelId}:${chosenTag}` : baseModelId;
 
+    // Immediately register in pulling state
     setPullingModels((prev) => ({
       ...prev,
-      [fullModelTag]: { status: 'Initiating pull...', percent: 10 },
+      [fullModelTag]: { status: 'Initiating download...', percent: 12 },
     }));
 
     try {
@@ -213,20 +274,24 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
       }
 
       setNotification({
-        text: `Downloading ${fullModelTag}... Model will be added to your pulled models.`,
+        text: `Downloading ${fullModelTag}... Check the loading bar below for live download progress.`,
       });
 
       // Poll pull status
       const pollInterval = setInterval(async () => {
         try {
-          const statusRes = await fetch(`/api/ollama/pull/status?model=${encodeURIComponent(fullModelTag)}`);
+          const statusRes = await fetch(
+            `/api/ollama/pull/status?model=${encodeURIComponent(fullModelTag)}`
+          );
           if (statusRes.ok) {
             const data = await statusRes.json();
             setPullingModels((prev) => ({
               ...prev,
               [fullModelTag]: {
-                status: data.status || 'Downloading...',
-                percent: data.percent || 50,
+                status: data.status || 'Downloading layers...',
+                percent: data.percent ?? 50,
+                completed: data.completed,
+                total: data.total,
               },
             }));
 
@@ -238,7 +303,7 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
                 return next;
               });
               setNotification({
-                text: `Model ${fullModelTag} pulled successfully and ready to use!`,
+                text: `Model ${fullModelTag} downloaded successfully and ready for chatter!`,
               });
               loadPulledModels();
               loadOnlineModels();
@@ -249,8 +314,8 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
         }
       }, 1000);
 
-      // Auto clear after 45s safety timeout
-      setTimeout(() => clearInterval(pollInterval), 45000);
+      // Auto clear after 60s
+      setTimeout(() => clearInterval(pollInterval), 60000);
     } catch (err: any) {
       setPullingModels((prev) => {
         const next = { ...prev };
@@ -264,26 +329,81 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
     }
   };
 
-  // Handle delete a pulled model
-  const handleDeletePulled = async (modelId: string) => {
-    if (!window.confirm(`Remove ${modelId} from your pulled models?`)) return;
-    try {
-      const res = await fetch(`/api/ollama/pulled/${encodeURIComponent(modelId)}`, {
-        method: 'DELETE',
+  // When user attempts to select a model
+  const handleAttemptSelect = (baseModelId: string, modelName: string, chosenTag?: string) => {
+    const tag = chosenTag || selectedTags[baseModelId] || 'latest';
+    const fullTag = tag !== 'latest' ? `${baseModelId}:${tag}` : baseModelId;
+
+    if (isModelAvailableLocally(fullTag)) {
+      // Available locally, select immediately!
+      onSelectModel(fullTag);
+      onClose();
+    } else {
+      // Inform the user and ask if they would like to pull the model!
+      setUnpulledPrompt({
+        baseModelId,
+        modelName,
+        tag,
+        fullTag,
       });
-      if (res.ok) {
-        loadPulledModels();
-        loadOnlineModels();
-        setNotification({ text: `Removed ${modelId}` });
-      }
-    } catch (err: any) {
-      setNotification({ text: err.message || 'Failed to remove model', isError: true });
     }
   };
 
-  // Filter online models by category tab and model size
+  // Confirm pull from unpulled prompt
+  const handleConfirmPullFromPrompt = () => {
+    if (!unpulledPrompt) return;
+    const { baseModelId, tag, fullTag } = unpulledPrompt;
+    setUnpulledPrompt(null);
+    handlePullModel(baseModelId, tag);
+    // Switch to pulled tab or stay to observe loading bar
+  };
+
+  // Select anyway (cloud / remote proxy mode)
+  const handleSelectAnyway = () => {
+    if (!unpulledPrompt) return;
+    onSelectModel(unpulledPrompt.fullTag);
+    setUnpulledPrompt(null);
+    onClose();
+  };
+
+  // Confirm and delete pulled model
+  const handleExecuteDeletePulled = async () => {
+    if (!deleteConfirmModel) return;
+    const targetModel = deleteConfirmModel;
+    setDeleteConfirmModel(null);
+
+    try {
+      const res = await fetch(`/api/ollama/pulled/${encodeURIComponent(targetModel)}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        setNotification({ text: `Successfully deleted model "${targetModel}"` });
+        loadPulledModels();
+        loadOnlineModels();
+
+        // If the active model was deleted, switch to fallback
+        if (selectedModelId.toLowerCase() === targetModel.toLowerCase()) {
+          onSelectModel('gemma2:2b');
+          setNotification({
+            text: `Deleted active model "${targetModel}". Switched active chatter to gemma2:2b.`,
+          });
+        }
+      } else {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to delete model');
+      }
+    } catch (err: any) {
+      setNotification({
+        text: err.message || 'Failed to remove model',
+        isError: true,
+      });
+    }
+  };
+
+  // Filter online models by category and size filter
   const filteredOnlineModels = useMemo(() => {
     return onlineModels.filter((model) => {
+      // Category filter
       const categoryConfig = CATEGORY_TABS.find((t) => t.id === activeCategory);
       if (categoryConfig) {
         if (categoryConfig.family && model.family !== categoryConfig.family) {
@@ -294,17 +414,16 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
         }
       }
 
-      if (sizeFilter !== 'all') {
-        const hasSize = model.parameters.some((p) =>
-          p.toLowerCase().startsWith(sizeFilter.toLowerCase()) ||
-          p.toLowerCase().includes(sizeFilter.toLowerCase())
-        );
-        if (!hasSize) return false;
+      // Size filter
+      const sizeConfig = SIZE_FILTERS.find((s) => s.id === activeSizeFilter);
+      if (sizeConfig && sizeConfig.test) {
+        const hasMatchingSize = model.parameters.some((p) => sizeConfig.test!(p));
+        if (!hasMatchingSize) return false;
       }
 
       return true;
     });
-  }, [onlineModels, activeCategory, sizeFilter]);
+  }, [onlineModels, activeCategory, activeSizeFilter]);
 
   // Filter pulled models by search query
   const filteredPulledModels = useMemo(() => {
@@ -321,10 +440,25 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
   const handleSelectCustom = () => {
     const trimmed = customModelInput.trim();
     if (!trimmed) return;
-    onSelectModel(trimmed);
-    setCustomModelInput('');
-    onClose();
+    if (isModelAvailableLocally(trimmed)) {
+      onSelectModel(trimmed);
+      setCustomModelInput('');
+      onClose();
+    } else {
+      const base = trimmed.split(':')[0];
+      const tag = trimmed.includes(':') ? trimmed.split(':')[1] : 'latest';
+      setUnpulledPrompt({
+        baseModelId: base,
+        modelName: trimmed,
+        tag,
+        fullTag: trimmed,
+      });
+      setCustomModelInput('');
+    }
   };
+
+  // Check if any downloads are active
+  const activeDownloadsList = Object.entries(pullingModels);
 
   if (!isOpen) return null;
 
@@ -349,13 +483,15 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
                   Ollama Models Hub
                 </h2>
                 <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 border border-zinc-700">
-                  {mainView === 'online' ? `${onlineModels.length} Online Models` : `${pulledModels.length} Pulled`}
+                  {mainView === 'online'
+                    ? `${onlineModels.length} Models`
+                    : `${pulledModels.length} Pulled`}
                 </span>
               </div>
               <p className="text-xs text-zinc-400">
                 {mainView === 'online'
-                  ? 'Real-time online catalog from Ollama library — pick any model to pull & chat'
-                  : 'Models currently pulled and available locally for chatter companion'}
+                  ? 'Browse models, select by parameter size (e.g. 8b, 12b), and pull with real-time download bar'
+                  : 'Models currently downloaded on your machine. Delete or switch models anytime'}
               </p>
             </div>
           </div>
@@ -394,7 +530,7 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
                 }`}
               >
                 <HardDrive className="w-3.5 h-3.5 text-emerald-400" />
-                <span>My Pulled & Local</span>
+                <span>My Pulled &amp; Local</span>
                 <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800/50">
                   {pulledModels.length}
                 </span>
@@ -410,208 +546,192 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
               }}
               disabled={isLoadingOnline || isLoadingPulled}
               title="Refresh models"
-              className="p-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors disabled:opacity-50"
+              className="p-2 rounded-xl bg-zinc-800 hover:bg-zinc-750 text-zinc-300 transition-colors disabled:opacity-50"
             >
-              <RefreshCw className={`w-4 h-4 ${isLoadingOnline || isLoadingPulled ? 'animate-spin' : ''}`} />
+              <RefreshCw
+                className={`w-4 h-4 ${isLoadingOnline || isLoadingPulled ? 'animate-spin' : ''}`}
+              />
             </button>
 
             {/* Close */}
             <button
               id="close-model-picker-btn"
               onClick={onClose}
-              className="p-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-zinc-200 transition-colors"
+              className="p-2 rounded-xl text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 transition-colors"
             >
-              <X className="w-4 h-4" />
+              <X className="w-5 h-5" />
             </button>
           </div>
         </div>
 
-        {/* Status & Notification Banner */}
-        <div className="px-5 py-2 bg-zinc-950/70 border-b border-zinc-800 flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex items-center gap-2">
-            <span
-              className={`w-2 h-2 rounded-full ${
-                ollamaStatus?.connected ? 'bg-emerald-400 shadow-sm shadow-emerald-400/80' : 'bg-amber-400'
-              }`}
-            />
-            <span className="text-zinc-300 font-medium">
-              Ollama Host: <code className="text-zinc-400 font-mono text-[11px]">{ollamaStatus?.host || 'http://localhost:11434'}</code>
-            </span>
-            {ollamaStatus?.connected ? (
-              <span className="text-emerald-400 text-[11px] font-medium bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-800/60">
-                Connected {ollamaStatus.version ? `(v${ollamaStatus.version})` : ''}
-              </span>
-            ) : (
-              <span className="text-amber-400 text-[11px] font-medium bg-amber-950/50 px-2 py-0.5 rounded border border-amber-800/60">
-                Offline / Remote Mode
-              </span>
-            )}
+        {/* Real-time Global Download / Loading Bar Banner */}
+        {activeDownloadsList.length > 0 && (
+          <div className="bg-amber-950/40 border-b border-amber-800/50 p-3 space-y-2">
+            {activeDownloadsList.map(([modelTag, progress]) => (
+              <div key={modelTag} className="max-w-4xl mx-auto space-y-1.5">
+                <div className="flex items-center justify-between text-xs text-amber-200">
+                  <div className="flex items-center gap-2">
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400 shrink-0" />
+                    <span className="font-semibold text-amber-300">
+                      Downloading {modelTag}
+                    </span>
+                    <span className="text-zinc-400 text-[11px]">&middot; {progress.status}</span>
+                  </div>
+                  <div className="flex items-center gap-2 font-mono font-bold text-amber-300">
+                    {progress.completed && progress.total && (
+                      <span className="text-[11px] text-zinc-400 font-normal">
+                        {Math.round(progress.completed / 1024 / 1024)} MB /{' '}
+                        {Math.round(progress.total / 1024 / 1024)} MB
+                      </span>
+                    )}
+                    <span>{progress.percent}%</span>
+                  </div>
+                </div>
+                {/* Live Animated Loading Bar */}
+                <div className="w-full bg-zinc-800 rounded-full h-2 overflow-hidden shadow-inner">
+                  <div
+                    className="bg-gradient-to-r from-amber-500 via-amber-400 to-emerald-400 h-2 rounded-full transition-all duration-300 ease-out"
+                    style={{ width: `${Math.max(8, progress.percent)}%` }}
+                  />
+                </div>
+              </div>
+            ))}
           </div>
+        )}
 
-          <div className="flex items-center gap-3">
-            <button
-              onClick={onOpenSettings}
-              className="text-xs text-indigo-400 hover:text-indigo-300 underline underline-offset-2 transition-colors"
-            >
-              Configure Host Settings &rarr;
-            </button>
-          </div>
-        </div>
-
-        {/* Global Toast / Feedback */}
+        {/* Notifications */}
         {notification && (
           <div
-            className={`px-5 py-2 text-xs flex items-center justify-between border-b ${
+            className={`px-4 py-2 text-xs flex items-center justify-between border-b ${
               notification.isError
-                ? 'bg-red-950/60 text-red-200 border-red-800/60'
-                : 'bg-emerald-950/60 text-emerald-200 border-emerald-800/60'
+                ? 'bg-red-950/80 border-red-800 text-red-200'
+                : 'bg-emerald-950/80 border-emerald-800 text-emerald-200'
             }`}
           >
-            <span>{notification.text}</span>
-            <button onClick={() => setNotification(null)} className="text-zinc-400 hover:text-zinc-200 text-xs ml-3">
-              &times;
+            <div className="flex items-center gap-2">
+              {notification.isError ? (
+                <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+              ) : (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              )}
+              <span>{notification.text}</span>
+            </div>
+            <button
+              onClick={() => setNotification(null)}
+              className="text-xs hover:opacity-80 ml-2"
+            >
+              Dismiss
             </button>
           </div>
         )}
 
-        {/* Search & Category Filter Section */}
-        <div className="p-4 border-b border-zinc-800 bg-zinc-900/60 space-y-3">
-          <div className="relative">
-            <Search className="w-4 h-4 text-zinc-500 absolute left-3.5 top-1/2 -translate-y-1/2" />
-            <input
-              id="search-models-input"
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder={
-                mainView === 'online'
-                  ? 'Search live online Ollama library (e.g. llama3.2, deepseek-r1, gemma2, qwen2.5, phi4, 7b)...'
-                  : 'Search your pulled & local models...'
-              }
-              className="w-full bg-zinc-950 border border-zinc-800 rounded-xl pl-10 pr-4 py-2 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500/70 focus:ring-1 focus:ring-indigo-500/50"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300 text-xs"
-              >
-                Clear
-              </button>
+        {/* Search and Filters Bar */}
+        <div className="p-4 border-b border-zinc-800 bg-zinc-950/60 space-y-3">
+          <div className="flex flex-col sm:flex-row gap-3">
+            {/* Search Input */}
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                id="search-models-input"
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder={
+                  mainView === 'online'
+                    ? 'Search by name or size: e.g. "qwen2.5 8b", "llama 3.2", "deepseek r1"...'
+                    : 'Filter your pulled models...'
+                }
+                className="w-full pl-9 pr-4 py-2 bg-zinc-900 border border-zinc-700/80 rounded-xl text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-indigo-500"
+              />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* Size Filter Selector (For Online View) */}
+            {mainView === 'online' && (
+              <div className="flex items-center gap-1.5 bg-zinc-900 px-2 py-1 rounded-xl border border-zinc-800 text-xs">
+                <SlidersHorizontal className="w-3.5 h-3.5 text-indigo-400 shrink-0 ml-1" />
+                <span className="text-zinc-400 text-[11px] hidden md:inline">Size:</span>
+                <div className="flex gap-1 overflow-x-auto">
+                  {SIZE_FILTERS.map((s) => (
+                    <button
+                      key={s.id}
+                      onClick={() => setActiveSizeFilter(s.id)}
+                      className={`px-2 py-1 rounded-lg text-[11px] whitespace-nowrap transition-colors ${
+                        activeSizeFilter === s.id
+                          ? 'bg-indigo-600 text-white font-medium'
+                          : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
+                      }`}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
 
-          {/* Sub-categories (Only for Online view) */}
+          {/* Category Tabs (Online View) */}
           {mainView === 'online' && (
-            <div className="space-y-1.5">
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs scrollbar-thin">
-                {CATEGORY_TABS.map((cat) => (
-                  <button
-                    key={cat.id}
-                    onClick={() => setActiveCategory(cat.id)}
-                    className={`px-3 py-1.5 rounded-lg font-medium whitespace-nowrap transition-colors text-xs flex items-center gap-1.5 ${
-                      activeCategory === cat.id
-                        ? 'bg-indigo-600 text-white shadow-sm'
-                        : 'bg-zinc-800/80 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'
-                    }`}
-                  >
-                    {cat.icon}
-                    <span>{cat.label}</span>
-                  </button>
-                ))}
-              </div>
-
-              {/* Quick Model Size Filter (Requirement: select model by size) */}
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs scrollbar-thin pt-1 border-t border-zinc-800/60">
-                <span className="text-[10px] text-zinc-400 font-semibold uppercase tracking-wider shrink-0 mr-1 flex items-center gap-1">
-                  <Cpu className="w-3 h-3 text-amber-400" />
-                  <span>Size Filter:</span>
-                </span>
-                {QUICK_SIZE_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.id}
-                    onClick={() => setSizeFilter(opt.id)}
-                    className={`px-2.5 py-1 rounded-md text-[11px] font-mono whitespace-nowrap transition-colors ${
-                      sizeFilter === opt.id
-                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold shadow-sm'
-                        : 'bg-zinc-900/80 text-zinc-400 border border-zinc-800 hover:text-zinc-200 hover:bg-zinc-850'
-                    }`}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
+            <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-thin">
+              {CATEGORY_TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveCategory(tab.id)}
+                  className={`px-2.5 py-1 rounded-lg text-xs flex items-center gap-1.5 whitespace-nowrap transition-all ${
+                    activeCategory === tab.id
+                      ? 'bg-zinc-800 text-zinc-100 border border-zinc-700 font-medium'
+                      : 'text-zinc-400 hover:text-zinc-300 hover:bg-zinc-900'
+                  }`}
+                >
+                  {tab.icon}
+                  <span>{tab.label}</span>
+                </button>
+              ))}
             </div>
           )}
         </div>
 
-        {/* Content Area */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-[340px]">
-          {/* Active Model Download Loading Bars (Requirement: loading bar to see how the model is being downloaded) */}
-          {Object.keys(pullingModels).length > 0 && (
-            <div className="bg-gradient-to-r from-amber-950/40 via-zinc-900 to-zinc-950 border border-amber-500/40 rounded-xl p-3.5 space-y-2.5 shadow-lg">
-              <div className="flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2 text-amber-300 font-semibold">
-                  <RefreshCw className="w-4 h-4 animate-spin text-amber-400" />
-                  <span>Active Download in Progress</span>
-                </div>
-                <span className="text-[10px] text-zinc-400 uppercase tracking-wider font-mono">
-                  Streaming from Ollama Library
-                </span>
-              </div>
-              {Object.entries(pullingModels).map(([modelTag, state]) => (
-                <div key={modelTag} className="bg-black/50 border border-zinc-800/80 rounded-lg p-2.5 space-y-1.5">
-                  <div className="flex items-center justify-between text-xs">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono font-bold text-zinc-100">{modelTag}</span>
-                      <span className="text-[11px] text-zinc-400">{state.status}</span>
-                    </div>
-                    <span className="font-mono font-bold text-amber-400">{state.percent}%</span>
-                  </div>
-                  <div className="w-full bg-zinc-800 rounded-full h-2 overflow-hidden">
-                    <div
-                      className="bg-gradient-to-r from-amber-500 to-amber-300 h-2 rounded-full transition-all duration-300"
-                      style={{ width: `${Math.max(state.percent, 3)}%` }}
-                    />
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-          {/* VIEW 1: ONLINE MODELS (The requested online-first view of all models available online) */}
+        {/* Body Content */}
+        <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
+          {/* VIEW 1: ONLINE LIBRARY */}
           {mainView === 'online' && (
             <>
-              {isLoadingOnline && onlineModels.length === 0 ? (
+              {isLoadingOnline ? (
                 <div className="text-center py-16 space-y-3">
                   <RefreshCw className="w-8 h-8 text-indigo-400 animate-spin mx-auto" />
-                  <p className="text-sm font-medium text-zinc-300">Fetching current online models from Ollama...</p>
-                  <p className="text-xs text-zinc-500">Querying real-time Ollama library directory</p>
+                  <p className="text-xs text-zinc-400">Loading Ollama models library...</p>
                 </div>
               ) : filteredOnlineModels.length === 0 ? (
-                <div className="text-center py-16">
+                <div className="text-center py-16 space-y-2">
                   <Globe className="w-10 h-10 text-zinc-600 mx-auto mb-2" />
-                  <p className="text-sm font-medium text-zinc-300">No online models matched your search</p>
-                  <p className="text-xs text-zinc-500 mt-1 max-w-sm mx-auto">
-                    Try searching for common names like &quot;gemma&quot;, &quot;llama&quot;, &quot;deepseek&quot;, or enter a custom tag below.
+                  <p className="text-sm font-medium text-zinc-300">
+                    No models matched your search or size filter
+                  </p>
+                  <p className="text-xs text-zinc-500 max-w-sm mx-auto">
+                    Try clearing the size filter or searching for &quot;qwen&quot;, &quot;llama&quot;,
+                    or &quot;deepseek&quot;.
                   </p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
                   {filteredOnlineModels.map((model) => {
-                    const currentTag = selectedTags[model.id] || (model.parameters[0] || 'latest');
-                    const fullModelTag = currentTag !== 'latest' ? `${model.id}:${currentTag}` : model.id;
-                    const isSelected = selectedModelId.toLowerCase() === fullModelTag.toLowerCase() ||
-                                       selectedModelId.toLowerCase() === model.id.toLowerCase();
+                    const currentTag =
+                      selectedTags[model.id] || model.parameters[0] || 'latest';
+                    const fullModelTag =
+                      currentTag !== 'latest' ? `${model.id}:${currentTag}` : model.id;
 
-                    // Check if already pulled
-                    const isPulled =
-                      pulledModels.some(
-                        (p) =>
-                          p.id.toLowerCase() === fullModelTag.toLowerCase() ||
-                          p.id.toLowerCase() === model.id.toLowerCase() ||
-                          p.baseModelId?.toLowerCase() === model.id.toLowerCase()
-                      ) || model.isPulled;
-
-                    const pullState = pullingModels[fullModelTag] || pullingModels[model.id];
+                    const isSelected =
+                      selectedModelId.toLowerCase() === fullModelTag.toLowerCase();
+                    const isLocallyPulled = isModelAvailableLocally(fullModelTag);
+                    const pullState =
+                      pullingModels[fullModelTag] || pullingModels[model.id];
 
                     return (
                       <div
@@ -623,71 +743,96 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
                         }`}
                       >
                         <div>
-                          {/* Card Header: Model Slug & Badges */}
+                          {/* Card Header: Model Slug & Status */}
                           <div className="flex items-start justify-between gap-2 mb-2">
                             <div className="flex items-center gap-2">
                               <span className="text-xs font-mono font-bold text-zinc-100 bg-zinc-800/90 px-2 py-0.5 rounded border border-zinc-700">
                                 {model.id}
                               </span>
-                              <span className="text-[10px] text-zinc-400 bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800">
-                                {model.pulls} pulls
-                              </span>
+                              {model.pulls && (
+                                <span className="text-[10px] text-zinc-400 bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800">
+                                  {model.pulls} pulls
+                                </span>
+                              )}
                             </div>
 
-                            {/* Status Pill */}
-                            {isPulled ? (
+                            {/* Status Pill for Selected Tag */}
+                            {isLocallyPulled ? (
                               <span className="text-[10px] font-semibold text-emerald-400 bg-emerald-950/70 border border-emerald-800/70 px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0">
                                 <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                                Pulled & Local
+                                Available Locally
                               </span>
                             ) : (
                               <span className="text-[10px] font-medium text-amber-400/90 bg-amber-950/30 border border-amber-800/50 px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0">
                                 <Globe className="w-3 h-3" />
-                                Available Online
+                                Needs Pulling
                               </span>
                             )}
                           </div>
 
                           {/* Model Title & Description */}
-                          <h3 className="text-xs font-semibold text-zinc-200 mb-1">{model.name}</h3>
+                          <h3 className="text-xs font-semibold text-zinc-200 mb-1">
+                            {model.name}
+                          </h3>
                           <p className="text-[11px] text-zinc-400 leading-relaxed line-clamp-2 mb-3">
                             {model.description}
                           </p>
 
-                          {/* Parameter options & capabilities */}
-                          <div className="space-y-2 mb-3">
-                            {/* Parameters options */}
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <span className="text-[10px] text-zinc-500 uppercase font-semibold mr-1">
-                                Sizes:
+                          {/* SELECT BY SIZE: Parameter Size Pills */}
+                          <div className="space-y-2 mb-3 bg-zinc-900/40 p-2.5 rounded-xl border border-zinc-800/60">
+                            <div className="flex items-center justify-between">
+                              <span className="text-[10px] text-zinc-400 uppercase font-semibold">
+                                Select Parameter Size:
                               </span>
+                              <span className="font-mono text-[11px] text-indigo-300 font-semibold">
+                                {model.id}:{currentTag}
+                              </span>
+                            </div>
+
+                            <div className="flex flex-wrap items-center gap-1.5">
                               {model.parameters.map((param) => {
-                                const isTagActive = (selectedTags[model.id] || model.parameters[0]) === param;
+                                const isTagActive = currentTag === param;
+                                const paramFullTag = `${model.id}:${param}`;
+                                const isParamPulled = isModelAvailableLocally(paramFullTag);
+
                                 return (
                                   <button
                                     key={param}
                                     onClick={() =>
-                                      setSelectedTags((prev) => ({ ...prev, [model.id]: param }))
+                                      setSelectedTags((prev) => ({
+                                        ...prev,
+                                        [model.id]: param,
+                                      }))
                                     }
-                                    className={`text-[10px] font-mono px-2 py-0.5 rounded border transition-colors ${
+                                    className={`text-[10px] font-mono px-2 py-1 rounded-lg border transition-all flex items-center gap-1 ${
                                       isTagActive
-                                        ? 'bg-indigo-600 text-white border-indigo-500'
+                                        ? 'bg-indigo-600 text-white border-indigo-400 shadow-sm font-bold ring-1 ring-white/20'
+                                        : isParamPulled
+                                        ? 'bg-emerald-950/40 text-emerald-300 border-emerald-800/60 hover:border-emerald-600'
                                         : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:border-zinc-700 hover:text-zinc-200'
                                     }`}
+                                    title={
+                                      isParamPulled
+                                        ? `${model.id}:${param} (Installed locally)`
+                                        : `${model.id}:${param} (Online)`
+                                    }
                                   >
-                                    {param}
+                                    <span>{param}</span>
+                                    {isParamPulled && (
+                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                                    )}
                                   </button>
                                 );
                               })}
                             </div>
 
-                            {/* Capability Tags */}
+                            {/* Capabilities */}
                             {model.capabilities.length > 0 && (
-                              <div className="flex flex-wrap items-center gap-1">
+                              <div className="flex flex-wrap items-center gap-1 pt-1">
                                 {model.capabilities.map((cap) => (
                                   <span
                                     key={cap}
-                                    className="text-[9px] font-medium uppercase tracking-wider px-1.5 py-0.2 rounded bg-zinc-900/80 text-zinc-400 border border-zinc-800"
+                                    className="text-[9px] font-medium uppercase tracking-wider px-1.5 py-0.2 rounded bg-zinc-900 text-zinc-400 border border-zinc-800"
                                   >
                                     {cap}
                                   </span>
@@ -700,77 +845,78 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
                         {/* Pulling Progress or Action Controls */}
                         <div className="pt-2.5 border-t border-zinc-800/70">
                           {pullState ? (
-                            <div className="space-y-1.5">
+                            /* Live Loading Bar */
+                            <div className="space-y-1.5 bg-zinc-950 p-2 rounded-xl border border-amber-800/40">
                               <div className="flex items-center justify-between text-[11px] text-amber-300">
-                                <span className="flex items-center gap-1.5">
-                                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                                  {pullState.status}
+                                <span className="flex items-center gap-1.5 truncate">
+                                  <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0 text-amber-400" />
+                                  <span className="truncate">{pullState.status}</span>
                                 </span>
-                                <span className="font-mono font-semibold">{pullState.percent}%</span>
+                                <span className="font-mono font-bold text-amber-400 ml-2 shrink-0">
+                                  {pullState.percent}%
+                                </span>
                               </div>
-                              <div className="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden">
+                              <div className="w-full bg-zinc-800 rounded-full h-2 overflow-hidden">
                                 <div
-                                  className="bg-amber-400 h-1.5 rounded-full transition-all duration-300"
-                                  style={{ width: `${pullState.percent}%` }}
+                                  className="bg-gradient-to-r from-amber-500 to-emerald-400 h-2 rounded-full transition-all duration-300 ease-out"
+                                  style={{ width: `${Math.max(5, pullState.percent)}%` }}
                                 />
                               </div>
                             </div>
                           ) : (
                             <div className="flex items-center gap-2">
-                              {/* If already pulled, can select directly as chatter */}
-                              {isPulled ? (
+                              {/* Primary Select Button: Informs if unpulled, or activates if pulled */}
+                              <button
+                                id={`select-btn-${model.id}-${currentTag}`}
+                                onClick={() =>
+                                  handleAttemptSelect(model.id, model.name, currentTag)
+                                }
+                                className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition-all shadow-sm ${
+                                  isSelected
+                                    ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/20'
+                                    : isLocallyPulled
+                                    ? 'bg-zinc-800 hover:bg-zinc-750 text-zinc-100 border border-zinc-700'
+                                    : 'bg-indigo-950/60 hover:bg-indigo-900/60 text-indigo-200 border border-indigo-800/60'
+                                }`}
+                              >
+                                {isSelected ? (
+                                  <>
+                                    <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                    <span>Active Chatter Model</span>
+                                  </>
+                                ) : isLocallyPulled ? (
+                                  <>
+                                    <span>Select &amp; Chat ({currentTag})</span>
+                                    <ArrowRight className="w-3 h-3 text-zinc-400" />
+                                  </>
+                                ) : (
+                                  <>
+                                    <span>Select {currentTag}</span>
+                                    <span className="text-[10px] text-amber-300 font-normal">
+                                      (Will Prompt to Pull)
+                                    </span>
+                                  </>
+                                )}
+                              </button>
+
+                              {/* Direct Pull Button */}
+                              {!isLocallyPulled ? (
                                 <button
-                                  id={`select-online-${model.id}-btn`}
-                                  onClick={() => {
-                                    onSelectModel(fullModelTag);
-                                    onClose();
-                                  }}
-                                  className={`flex-1 py-1.5 px-3 rounded-lg text-xs font-medium flex items-center justify-center gap-1.5 transition-colors ${
-                                    isSelected
-                                      ? 'bg-indigo-600 text-white shadow-sm'
-                                      : 'bg-zinc-800 hover:bg-zinc-750 text-zinc-200'
-                                  }`}
+                                  id={`pull-btn-${model.id}-${currentTag}`}
+                                  onClick={() => handlePullModel(model.id, currentTag)}
+                                  className="py-1.5 px-3 rounded-lg text-xs font-medium bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 flex items-center gap-1 transition-colors shrink-0"
+                                  title={`Download and pull ${model.id}:${currentTag}`}
                                 >
-                                  {isSelected ? (
-                                    <>
-                                      <Check className="w-3.5 h-3.5" />
-                                      <span>Active Chatter Model</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <span>Select & Chat</span>
-                                      <ArrowRight className="w-3 h-3 text-zinc-400" />
-                                    </>
-                                  )}
+                                  <Download className="w-3.5 h-3.5 text-amber-400" />
+                                  <span>Pull</span>
                                 </button>
                               ) : (
                                 <button
-                                  id={`pull-online-${model.id}-btn`}
-                                  onClick={() =>
-                                    setConfirmPullModal({
-                                      baseModelId: model.id,
-                                      tag: currentTag,
-                                      fullModelTag,
-                                      name: model.name,
-                                      description: model.description,
-                                    })
-                                  }
-                                  className="flex-1 py-1.5 px-3 rounded-lg text-xs font-medium bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/40 flex items-center justify-center gap-1.5 transition-colors shadow-sm"
-                                  title={`Select or pull ${fullModelTag} from online library`}
-                                >
-                                  <Download className="w-3.5 h-3.5 text-amber-400" />
-                                  <span>Select &amp; Pull ({currentTag})</span>
-                                </button>
-                              )}
-
-                              {/* Direct pull button if already pulled to re-pull/update */}
-                              {isPulled && (
-                                <button
                                   onClick={() => handlePullModel(model.id, currentTag)}
-                                  title={`Re-pull or update ${fullModelTag}`}
+                                  title={`Re-pull or update ${model.id}:${currentTag}`}
                                   className="p-1.5 rounded-lg text-zinc-400 hover:text-amber-300 hover:bg-zinc-800 transition-colors"
                                 >
-                                  <Download className="w-3.5 h-3.5" />
+                                  <RefreshCw className="w-3.5 h-3.5" />
                                 </button>
                               )}
                             </div>
@@ -784,7 +930,7 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
             </>
           )}
 
-          {/* VIEW 2: MY PULLED & LOCAL MODELS (List of models previously pulled or available locally) */}
+          {/* VIEW 2: MY PULLED & LOCAL MODELS */}
           {mainView === 'pulled' && (
             <>
               {filteredPulledModels.length === 0 ? (
@@ -792,7 +938,8 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
                   <HardDrive className="w-12 h-12 text-zinc-600 mx-auto" />
                   <h3 className="text-sm font-semibold text-zinc-200">No Pulled Models Found</h3>
                   <p className="text-xs text-zinc-400 max-w-md mx-auto">
-                    You haven&apos;t pulled any models yet. Switch to the Online Library tab to browse and download your first model with one click.
+                    You don&apos;t have any models downloaded yet. Switch to the Online Library tab to
+                    browse models by name or size and download them with one click.
                   </p>
                   <button
                     onClick={() => setMainView('online')}
@@ -803,10 +950,10 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
                   </button>
                 </div>
               ) : (
-                <div className="space-y-2.5">
+                <div className="space-y-3">
                   <div className="text-xs text-zinc-400 flex items-center justify-between pb-1">
                     <span>
-                      Showing {filteredPulledModels.length} models ready for inference
+                      Showing {filteredPulledModels.length} models ready for chatter &amp; inference
                     </span>
                     <span className="text-[11px] text-zinc-500">
                       Persistent across sessions
@@ -815,8 +962,11 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     {filteredPulledModels.map((model) => {
-                      const isSelected = selectedModelId.toLowerCase() === model.id.toLowerCase();
-                      const dateStr = model.pulledAt ? new Date(model.pulledAt).toLocaleDateString() : 'Installed';
+                      const isSelected =
+                        selectedModelId.toLowerCase() === model.id.toLowerCase();
+                      const dateStr = model.pulledAt
+                        ? new Date(model.pulledAt).toLocaleDateString()
+                        : 'Installed';
 
                       return (
                         <div
@@ -851,16 +1001,16 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
                               </span>
                             </div>
 
-                            <h4 className="text-xs font-semibold text-zinc-200 mb-1">{model.name}</h4>
+                            <h4 className="text-xs font-semibold text-zinc-200 mb-1">
+                              {model.name}
+                            </h4>
                             <p className="text-[11px] text-zinc-400 line-clamp-2 mb-2">
                               {model.description || `Local Ollama model profile for companion chatter.`}
                             </p>
-                            <p className="text-[10px] text-zinc-500">
-                              Pulled: {dateStr}
-                            </p>
+                            <p className="text-[10px] text-zinc-500">Pulled: {dateStr}</p>
                           </div>
 
-                          <div className="flex items-center gap-2 pt-3 border-t border-zinc-800/70 mt-2">
+                          <div className="flex items-center gap-2 pt-3 border-t border-zinc-800/70 mt-3">
                             <button
                               id={`select-pulled-${model.id}-btn`}
                               onClick={() => {
@@ -883,13 +1033,15 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
                               )}
                             </button>
 
+                            {/* Delete Button with In-App Confirmation */}
                             <button
                               id={`delete-pulled-${model.id}-btn`}
-                              onClick={() => handleDeletePulled(model.id)}
-                              title={`Remove ${model.id} from pulled list`}
-                              className="p-1.5 rounded-lg text-zinc-500 hover:text-red-400 hover:bg-zinc-800 transition-colors"
+                              onClick={() => setDeleteConfirmModel(model.id)}
+                              title={`Delete ${model.id} from local repository`}
+                              className="px-2.5 py-1.5 rounded-lg text-zinc-400 hover:text-red-400 hover:bg-red-950/40 border border-transparent hover:border-red-800/50 transition-colors flex items-center gap-1 text-xs"
                             >
                               <Trash2 className="w-3.5 h-3.5" />
+                              <span className="hidden sm:inline">Delete</span>
                             </button>
                           </div>
                         </div>
@@ -907,7 +1059,7 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
           <div className="flex items-center gap-2 w-full sm:w-auto flex-1">
             <Terminal className="w-4 h-4 text-zinc-500 shrink-0" />
             <span className="text-xs text-zinc-400 shrink-0 hidden md:inline">
-              Custom Ollama Tag:
+              Custom Tag:
             </span>
             <input
               id="custom-model-tag-input"
@@ -915,7 +1067,7 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
               value={customModelInput}
               onChange={(e) => setCustomModelInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSelectCustom()}
-              placeholder="e.g. gemma4:12b, vicuna:13b, or user/my-custom-model"
+              placeholder="e.g. qwen2.5:8b, llama3.2:1b, or user/my-custom-model"
               className="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-indigo-500"
             />
             <button
@@ -946,73 +1098,127 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
         </div>
       </div>
 
-      {/* Confirmation Modal when user selects a model that is not available locally */}
-      {confirmPullModal && (
+      {/* CONFIRMATION DIALOG: Model Not Available Locally */}
+      {unpulledPrompt && (
         <div
-          id="confirm-pull-modal"
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150"
+          id="unpulled-model-dialog"
+          className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-in fade-in"
         >
-          <div className="bg-zinc-900 border border-zinc-700 rounded-2xl max-w-md w-full p-5 space-y-4 shadow-2xl ring-1 ring-white/10">
+          <div className="bg-zinc-900 border border-amber-500/40 rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-4 ring-1 ring-amber-500/20">
             <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/30 text-amber-400 flex items-center justify-center shrink-0">
-                <Download className="w-5 h-5" />
+              <div className="w-10 h-10 rounded-xl bg-amber-950/60 border border-amber-800/80 text-amber-400 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
               </div>
-              <div className="flex-1">
-                <h4 className="text-sm font-semibold text-zinc-100">
+              <div>
+                <h3 className="text-sm font-semibold text-zinc-100">
                   Model Not Available Locally
-                </h4>
-                <p className="text-xs text-zinc-400 mt-0.5">
-                  Download required to use this model
+                </h3>
+                <p className="text-xs text-zinc-400 mt-1">
+                  You selected{' '}
+                  <span className="font-mono text-amber-300 font-semibold">
+                    {unpulledPrompt.fullTag}
+                  </span>
+                  , but this model has not been pulled to your local machine yet.
                 </p>
               </div>
-              <button
-                onClick={() => setConfirmPullModal(null)}
-                className="text-zinc-400 hover:text-zinc-200 p-1"
-              >
-                <X className="w-4 h-4" />
-              </button>
             </div>
 
-            <div className="bg-zinc-950/80 border border-zinc-800 rounded-xl p-3.5 space-y-2 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="text-zinc-400">Selected Model:</span>
-                <span className="font-semibold text-zinc-200">{confirmPullModal.name}</span>
+            <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800 text-xs space-y-1 text-zinc-300">
+              <div className="flex justify-between">
+                <span className="text-zinc-500">Model:</span>
+                <span className="font-medium text-zinc-200">{unpulledPrompt.modelName}</span>
               </div>
-              <div className="flex items-center justify-between">
-                <span className="text-zinc-400">Model Tag &amp; Size:</span>
-                <span className="font-mono text-amber-400 font-bold bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800/60">
-                  {confirmPullModal.fullModelTag}
+              <div className="flex justify-between">
+                <span className="text-zinc-500">Selected Size:</span>
+                <span className="font-mono text-indigo-300 font-semibold">
+                  {unpulledPrompt.tag}
                 </span>
               </div>
-              {confirmPullModal.description && (
-                <p className="text-[11px] text-zinc-400 pt-1 border-t border-zinc-800 leading-relaxed">
-                  {confirmPullModal.description}
-                </p>
-              )}
+              <div className="flex justify-between">
+                <span className="text-zinc-500">Action Required:</span>
+                <span className="text-amber-300 font-medium">Download / Pull Required</span>
+              </div>
             </div>
 
-            <p className="text-xs text-zinc-300 leading-relaxed">
-              This model is currently not installed on your local Ollama server. Would you like to pull and download it now? You will see a real-time progress bar tracking the download.
+            <p className="text-xs text-zinc-400">
+              Would you like to pull and download this model now to begin chatting? You will be able
+              to watch the download progress in real time via the loading bar.
             </p>
 
-            <div className="flex items-center justify-end gap-2.5 pt-1">
+            <div className="flex flex-col gap-2 pt-2">
               <button
-                onClick={() => setConfirmPullModal(null)}
-                className="px-4 py-2 rounded-xl text-xs font-medium text-zinc-400 hover:text-zinc-200 bg-zinc-800 hover:bg-zinc-750 transition-colors"
+                id="confirm-pull-download-btn"
+                onClick={handleConfirmPullFromPrompt}
+                className="w-full py-2 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-zinc-950 font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 transition-all"
+              >
+                <Download className="w-4 h-4 text-zinc-950" />
+                <span>Download &amp; Pull {unpulledPrompt.fullTag}</span>
+              </button>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSelectAnyway}
+                  className="flex-1 py-1.5 px-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs transition-colors"
+                  title="Select for remote or proxy Ollama instance"
+                >
+                  Select Anyway (Remote)
+                </button>
+                <button
+                  onClick={() => setUnpulledPrompt(null)}
+                  className="py-1.5 px-3 rounded-xl border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 text-xs transition-colors"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONFIRMATION DIALOG: Delete Pulled Model */}
+      {deleteConfirmModel && (
+        <div
+          id="delete-model-dialog"
+          className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-in fade-in"
+        >
+          <div className="bg-zinc-900 border border-red-500/40 rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-4 ring-1 ring-red-500/20">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-xl bg-red-950/60 border border-red-800/80 text-red-400 flex items-center justify-center shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-semibold text-zinc-100">
+                  Delete Pulled Model?
+                </h3>
+                <p className="text-xs text-zinc-400 mt-1">
+                  Are you sure you want to delete{' '}
+                  <span className="font-mono text-red-300 font-semibold">
+                    {deleteConfirmModel}
+                  </span>{' '}
+                  from your pulled models repository?
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-zinc-400">
+              This will remove the model profile and delete local cached weights. You can re-pull it
+              anytime from the online library.
+            </p>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                onClick={() => setDeleteConfirmModel(null)}
+                className="px-4 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium transition-colors"
               >
                 Cancel
               </button>
               <button
-                id="confirm-pull-action-btn"
-                onClick={() => {
-                  const { baseModelId, tag } = confirmPullModal;
-                  setConfirmPullModal(null);
-                  handlePullModel(baseModelId, tag);
-                }}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-zinc-950 bg-amber-500 hover:bg-amber-400 transition-all shadow-lg shadow-amber-500/20"
+                id="confirm-delete-model-btn"
+                onClick={handleExecuteDeletePulled}
+                className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white text-xs font-bold transition-colors flex items-center gap-1.5 shadow-lg shadow-red-600/20"
               >
-                <Download className="w-4 h-4" />
-                <span>Yes, Pull Model</span>
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete Model</span>
               </button>
             </div>
           </div>

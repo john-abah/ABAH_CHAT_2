@@ -210,23 +210,61 @@ async function fetchOnlineOllamaModels(query?: string): Promise<OnlineOllamaMode
   }
 
   // Fallback catalog if ollama.com is unreachable
-  const fallbackList: OnlineOllamaModel[] = OFFICIAL_OLLAMA_MODELS.map((m) => {
+  const grouped = new Map<string, OnlineOllamaModel>();
+  for (const m of OFFICIAL_OLLAMA_MODELS) {
     const baseId = m.id.split(':')[0];
-    return {
-      id: baseId,
-      name: m.name.split(' ')[0] + ' ' + (m.name.split(' ')[1] || ''),
-      description: m.description,
-      parameters: [m.parameters.toLowerCase()],
-      capabilities: m.family === 'deepseek' ? ['thinking'] : m.family === 'code' ? ['tools'] : [],
-      pulls: '10M+',
-      tagsCount: 'Official',
-      updated: 'Recent',
-      family: m.family,
-    };
-  });
+    const tag = m.id.includes(':') ? m.id.split(':')[1] : m.parameters.toLowerCase();
+    if (!grouped.has(baseId)) {
+      grouped.set(baseId, {
+        id: baseId,
+        name: formatModelName(baseId),
+        description: m.description,
+        parameters: [tag],
+        capabilities:
+          m.family === 'deepseek'
+            ? ['thinking']
+            : m.family === 'code'
+            ? ['tools']
+            : m.family === 'vision'
+            ? ['vision']
+            : [],
+        pulls: '25M+',
+        tagsCount: 'Official',
+        updated: 'Recent',
+        family: m.family,
+      });
+    } else {
+      const entry = grouped.get(baseId)!;
+      if (!entry.parameters.includes(tag)) {
+        entry.parameters.push(tag);
+      }
+    }
+  }
 
-  // Deduplicate by id
-  const uniqueFallback = Array.from(new Map(fallbackList.map((item) => [item.id, item])).values());
+  // Ensure popular models always have their full size variations
+  const sizeMap: Record<string, string[]> = {
+    'qwen2.5': ['0.5b', '1.5b', '3b', '7b', '14b', '32b', '72b'],
+    'qwen2.5-coder': ['0.5b', '1.5b', '3b', '7b', '14b', '32b'],
+    'deepseek-r1': ['1.5b', '7b', '8b', '14b', '32b', '70b'],
+    'llama3.2': ['1b', '3b'],
+    'llama3.1': ['8b', '70b', '405b'],
+    'llama3': ['8b', '70b'],
+    'gemma2': ['2b', '9b', '27b'],
+    'gemma': ['2b', '7b'],
+    'mistral': ['7b'],
+    'phi4': ['14b'],
+    'phi3': ['3.8b', '14b'],
+  };
+
+  for (const [id, sizes] of Object.entries(sizeMap)) {
+    if (grouped.has(id)) {
+      const entry = grouped.get(id)!;
+      const combined = Array.from(new Set([...entry.parameters, ...sizes]));
+      entry.parameters = combined;
+    }
+  }
+
+  const uniqueFallback = Array.from(grouped.values());
   if (isSearch) {
     return uniqueFallback.filter(
       (m) =>
@@ -544,11 +582,19 @@ app.get('/api/ollama/pulled', async (req, res) => {
 
 // 5. Delete / Remove a pulled model
 app.delete('/api/ollama/pulled/:modelId', async (req, res) => {
-  const modelId = decodeURIComponent(req.params.modelId);
+  const modelId = decodeURIComponent(req.params.modelId).trim();
+  const lowerId = modelId.toLowerCase();
   try {
     const pulled = getPulledModels();
-    const updated = pulled.filter((m) => m.id !== modelId && m.id !== `${modelId}:latest`);
+    const updated = pulled.filter((m) => {
+      const mLower = m.id.toLowerCase();
+      return mLower !== lowerId && mLower !== `${lowerId}:latest` && `${mLower}:latest` !== lowerId;
+    });
     savePulledModels(updated);
+
+    // Also remove from in-memory active pulls if present
+    activePulls.delete(modelId);
+    activePulls.delete(lowerId);
 
     // If connected to Ollama, also trigger Ollama DELETE
     const ollamaCheck = await fetchOllamaTags(currentOllamaBaseUrl);
@@ -568,6 +614,12 @@ app.delete('/api/ollama/pulled/:modelId', async (req, res) => {
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Failed to remove model' });
   }
+});
+
+// 5.5 Get all active in-flight pulls
+app.get('/api/ollama/pulls/active', (req, res) => {
+  const list = Array.from(activePulls.values());
+  res.json({ activePulls: list });
 });
 
 // 6. Trigger Ollama Pull for a Model (with active tracking)
@@ -741,6 +793,68 @@ app.get('/api/ollama/pull/status', (req, res) => {
     status: 'idle',
     percent: 0,
     isDone: false,
+  });
+});
+
+// Download Ubuntu .deb package
+app.get('/api/downloads/deb', (req, res) => {
+  const debPath = path.join(process.cwd(), 'public', 'downloads', 'abah-chat_1.0.0_all.deb');
+  if (fs.existsSync(debPath)) {
+    res.setHeader('Content-Disposition', 'attachment; filename="abah-chat_1.0.0_all.deb"');
+    res.setHeader('Content-Type', 'application/vnd.debian.binary-package');
+    return res.sendFile(debPath);
+  }
+  const rootDeb = path.join(process.cwd(), 'abah-chat_1.0.0_all.deb');
+  if (fs.existsSync(rootDeb)) {
+    res.setHeader('Content-Disposition', 'attachment; filename="abah-chat_1.0.0_all.deb"');
+    res.setHeader('Content-Type', 'application/vnd.debian.binary-package');
+    return res.sendFile(rootDeb);
+  }
+  res.status(404).json({ error: 'Debian package not found. Run ./build_deb.sh to compile.' });
+});
+
+// Download Android .apk package
+app.get('/api/downloads/apk', (req, res) => {
+  const apkPath = path.join(process.cwd(), 'public', 'downloads', 'abah-chat-1.0.0.apk');
+  if (fs.existsSync(apkPath)) {
+    res.setHeader('Content-Disposition', 'attachment; filename="abah-chat-1.0.0.apk"');
+    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+    return res.sendFile(apkPath);
+  }
+  const rootApk = path.join(process.cwd(), 'abah-chat-1.0.0.apk');
+  if (fs.existsSync(rootApk)) {
+    res.setHeader('Content-Disposition', 'attachment; filename="abah-chat-1.0.0.apk"');
+    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+    return res.sendFile(rootApk);
+  }
+  res.status(404).json({ error: 'Android APK package not found. Run ./build_apk.sh to compile.' });
+});
+
+// Packages information endpoint
+app.get('/api/downloads/info', (req, res) => {
+  const debPath = path.join(process.cwd(), 'public', 'downloads', 'abah-chat_1.0.0_all.deb');
+  const apkPath = path.join(process.cwd(), 'public', 'downloads', 'abah-chat-1.0.0.apk');
+
+  const debExists = fs.existsSync(debPath);
+  const apkExists = fs.existsSync(apkPath);
+
+  res.json({
+    deb: {
+      available: debExists,
+      filename: 'abah-chat_1.0.0_all.deb',
+      version: '1.0.0',
+      size: debExists ? `${Math.round(fs.statSync(debPath).size / 1024)} KB` : null,
+      downloadUrl: '/api/downloads/deb',
+      installCommand: 'sudo dpkg -i abah-chat_1.0.0_all.deb',
+    },
+    apk: {
+      available: apkExists,
+      filename: 'abah-chat-1.0.0.apk',
+      version: '1.0.0',
+      size: apkExists ? `${Math.round(fs.statSync(apkPath).size / 1024)} KB` : null,
+      downloadUrl: '/api/downloads/apk',
+      installCommand: 'adb install -r abah-chat-1.0.0.apk',
+    },
   });
 });
 
