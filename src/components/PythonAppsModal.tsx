@@ -173,52 +173,77 @@ export const PythonAppsModal: React.FC<PythonAppsModalProps> = ({ isOpen, onClos
           {/* TAB 1: UBUNTU LINUX APP */}
           {activeTab === 'ubuntu' && (
             <div className="space-y-4 max-w-4xl mx-auto">
-              <div className="bg-zinc-950/80 border border-zinc-800 rounded-xl p-4">
-                <div className="flex items-start justify-between gap-3">
+              {/* Primary Ubuntu .deb Package Banner */}
+              <div className="bg-gradient-to-r from-amber-950/40 via-zinc-950 to-zinc-900 border border-amber-500/40 rounded-xl p-4">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                   <div>
                     <h3 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
-                      <span>🐧 Ubuntu Desktop Application</span>
-                      <span className="text-[10px] px-2 py-0.5 rounded bg-amber-950 text-amber-300 border border-amber-800/60 font-mono">
-                        .desktop + App Launcher
+                      <span>🐧 Official Ubuntu Debian Package</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 font-mono font-bold">
+                        .deb (v1.0.0)
                       </span>
                     </h3>
-                    <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
-                      Written in pure Python with the standard library. Seamlessly integrates with the Ubuntu GNOME Application Grid, system dock, and search.
+                    <p className="text-xs text-zinc-300 mt-1 leading-relaxed">
+                      Complete native Ubuntu installer. Automatically checks and configures Ollama, registers GNOME launcher, and sets up terminal command <code className="text-amber-300 font-mono">abah-chat</code>.
                     </p>
                   </div>
-                  <a
-                    href="/abah_chat_python.zip"
-                    download="abah_chat_python.zip"
-                    className="px-3 py-1.5 rounded-lg bg-amber-600/90 hover:bg-amber-500 text-white text-xs font-medium flex items-center gap-1.5 shrink-0 shadow-sm"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Download App</span>
-                  </a>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <a
+                      id="download-deb-btn"
+                      href="/abah-chat.deb"
+                      download="abah-chat.deb"
+                      className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-950 text-xs font-bold flex items-center gap-2 shadow-lg shadow-amber-500/20 transition-all hover:scale-105"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>Download .deb (Ubuntu)</span>
+                    </a>
+                  </div>
                 </div>
               </div>
 
-              {/* Step 1: 1-Click Install */}
-              <div className="bg-zinc-950/60 border border-zinc-800/90 rounded-xl p-4 space-y-2">
+              {/* How to install .deb */}
+              <div className="bg-zinc-950/70 border border-zinc-800 rounded-xl p-4 space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-zinc-200">
-                    Method 1: 1-Click Desktop Installer (GNOME App Launcher)
+                  <span className="text-xs font-semibold text-zinc-200 flex items-center gap-2">
+                    <Terminal className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Install via Terminal with 1 Command:</span>
                   </span>
                   <button
                     onClick={() =>
-                      copyToClipboard(
-                        'chmod +x install_ubuntu.sh && ./install_ubuntu.sh',
-                        'ub_install'
-                      )
+                      copyToClipboard('sudo apt install ./abah-chat.deb || sudo dpkg -i abah-chat.deb', 'ub_deb_install')
                     }
                     className="text-xs text-zinc-400 hover:text-zinc-200 flex items-center gap-1"
                   >
-                    {copiedKey === 'ub_install' ? (
+                    {copiedKey === 'ub_deb_install' ? (
                       <Check className="w-3 h-3 text-emerald-400" />
                     ) : (
                       <Copy className="w-3 h-3" />
                     )}
-                    <span>{copiedKey === 'ub_install' ? 'Copied' : 'Copy'}</span>
+                    <span>{copiedKey === 'ub_deb_install' ? 'Copied' : 'Copy'}</span>
                   </button>
+                </div>
+                <div className="bg-black/90 rounded-lg p-3 font-mono text-xs text-amber-300 border border-zinc-800 flex items-center justify-between overflow-x-auto">
+                  <code>sudo apt install ./abah-chat.deb</code>
+                </div>
+                <p className="text-[11px] text-zinc-400">
+                  Installs all requirements, verifies Ollama, and adds <strong>ABAH CHAT</strong> to your Ubuntu system apps!
+                </p>
+              </div>
+
+              {/* Step 1: Alternative Script Install */}
+              <div className="bg-zinc-950/60 border border-zinc-800/90 rounded-xl p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-zinc-200">
+                    Method 2: Run directly from Source Archive (.zip)
+                  </span>
+                  <a
+                    href="/abah_chat_python.zip"
+                    download="abah_chat_python.zip"
+                    className="text-xs text-indigo-400 hover:text-indigo-300 flex items-center gap-1 underline"
+                  >
+                    <Download className="w-3 h-3" />
+                    <span>Download .zip</span>
+                  </a>
                 </div>
                 <div className="bg-black/80 rounded-lg p-3 font-mono text-xs text-emerald-400 border border-zinc-800/80 flex items-center justify-between">
                   <code>chmod +x install_ubuntu.sh &amp;&amp; ./install_ubuntu.sh</code>
@@ -308,28 +333,61 @@ export const PythonAppsModal: React.FC<PythonAppsModalProps> = ({ isOpen, onClos
           {/* TAB 2: ANDROID APP */}
           {activeTab === 'android' && (
             <div className="space-y-4 max-w-4xl mx-auto">
-              <div className="bg-zinc-950/80 border border-zinc-800 rounded-xl p-4">
-                <div className="flex items-start justify-between gap-3">
+              {/* Primary Android .apk Download Banner */}
+              <div className="bg-gradient-to-r from-emerald-950/40 via-zinc-950 to-zinc-900 border border-emerald-500/40 rounded-xl p-4">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                   <div>
                     <h3 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
-                      <span>🤖 Android Mobile Application</span>
-                      <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800/60 font-mono">
-                        APK &middot; Termux &middot; PWA
+                      <span>🤖 Official Android Application Package</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-mono font-bold">
+                        .apk (v1.0.0)
                       </span>
                     </h3>
-                    <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
-                      Available as a native compiled Android APK via Buildozer, or 1-tap execution directly on your Android phone using Termux.
+                    <p className="text-xs text-zinc-300 mt-1 leading-relaxed">
+                      Native compiled Android application with touch interface, local Ollama communication, and persistent memory. Install directly on any Android phone or tablet.
                     </p>
                   </div>
-                  <a
-                    href="/abah_chat_python.zip"
-                    download="abah_chat_python.zip"
-                    className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium flex items-center gap-1.5 shrink-0 shadow-sm"
-                  >
-                    <Download className="w-3.5 h-3.5" />
-                    <span>Download Bundle</span>
-                  </a>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <a
+                      id="download-apk-btn"
+                      href="/abah-chat.apk"
+                      download="abah-chat.apk"
+                      className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-bold flex items-center gap-2 shadow-lg shadow-emerald-500/20 transition-all hover:scale-105"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>Download .apk (Android)</span>
+                    </a>
+                  </div>
                 </div>
+              </div>
+
+              {/* Install on Android */}
+              <div className="bg-zinc-950/70 border border-zinc-800 rounded-xl p-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-zinc-200 flex items-center gap-2">
+                    <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>How to Install on Your Android Device:</span>
+                  </span>
+                  <button
+                    onClick={() =>
+                      copyToClipboard('adb install -r abah-chat.apk', 'adb_install')
+                    }
+                    className="text-xs text-zinc-400 hover:text-zinc-200 flex items-center gap-1"
+                  >
+                    {copiedKey === 'adb_install' ? (
+                      <Check className="w-3 h-3 text-emerald-400" />
+                    ) : (
+                      <Copy className="w-3 h-3" />
+                    )}
+                    <span>{copiedKey === 'adb_install' ? 'Copied' : 'Copy'}</span>
+                  </button>
+                </div>
+                <div className="bg-black/90 rounded-lg p-3 font-mono text-xs text-emerald-300 border border-zinc-800 flex items-center justify-between overflow-x-auto">
+                  <code>adb install -r abah-chat.apk</code>
+                </div>
+                <p className="text-[11px] text-zinc-400">
+                  Or download the <strong>.apk</strong> directly in your mobile browser, tap the notification, and select <em>Install</em> (allow install from unknown sources if prompted).
+                </p>
               </div>
 
               {/* Option 1: Native APK Build */}

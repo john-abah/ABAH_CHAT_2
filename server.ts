@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import { spawn, exec, execSync } from 'child_process';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
 import { OFFICIAL_OLLAMA_MODELS } from './src/data/ollamaModels';
@@ -345,6 +346,71 @@ async function fetchOllamaTags(baseUrl: string): Promise<{
       error: err.name === 'AbortError' ? 'Connection timed out' : err.message || 'Cannot reach Ollama',
     };
   }
+}
+
+// Helper to find Ollama binary in standard paths
+function findOllamaBinary(): string | null {
+  const candidates = [
+    '/usr/local/bin/ollama',
+    '/usr/bin/ollama',
+    '/bin/ollama',
+    `${process.env.HOME}/.ollama/bin/ollama`,
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  try {
+    const whichOut = execSync('which ollama 2>/dev/null', { encoding: 'utf-8' }).trim();
+    if (whichOut && fs.existsSync(whichOut)) return whichOut;
+  } catch {
+    // not in path
+  }
+  return null;
+}
+
+// Automatically start Ollama daemon if installed and not running
+async function ensureOllamaDaemon(): Promise<boolean> {
+  try {
+    const probe = await fetch(`${currentOllamaBaseUrl}/api/version`);
+    if (probe.ok) {
+      return true; // Already running
+    }
+  } catch {
+    // Not responding, try to start
+  }
+
+  const bin = findOllamaBinary();
+  if (!bin) {
+    console.log('[ABAH CHAT] Ollama binary not found in system paths. Auto-install available.');
+    return false;
+  }
+
+  console.log(`[ABAH CHAT] Automatically starting Ollama daemon via ${bin}...`);
+  try {
+    const child = spawn(bin, ['serve'], {
+      detached: true,
+      stdio: 'ignore',
+      env: { ...process.env, OLLAMA_HOST: '0.0.0.0' },
+    });
+    child.unref();
+
+    // Give daemon up to 3 seconds to respond
+    for (let i = 0; i < 6; i++) {
+      await new Promise((r) => setTimeout(r, 500));
+      try {
+        const probe = await fetch(`${currentOllamaBaseUrl}/api/version`);
+        if (probe.ok) {
+          console.log('[ABAH CHAT] Ollama daemon successfully started and responding.');
+          return true;
+        }
+      } catch {
+        // retry
+      }
+    }
+  } catch (err: any) {
+    console.error('[ABAH CHAT] Error launching Ollama daemon:', err.message);
+  }
+  return false;
 }
 
 // 1. Health check
@@ -725,7 +791,72 @@ app.post('/api/ollama/config', async (req, res) => {
     connected: status.connected,
     version: status.version,
     installedCount: status.models.length,
+    status,
     error: status.error,
+  });
+});
+
+// Alias for host update (matches App.tsx /api/ollama/host call)
+app.post('/api/ollama/host', async (req, res) => {
+  const { host } = req.body;
+  if (!host || typeof host !== 'string') {
+    return res.status(400).json({ error: 'Valid Ollama host URL is required' });
+  }
+
+  let cleanedHost = host.trim();
+  if (!cleanedHost.startsWith('http://') && !cleanedHost.startsWith('https://')) {
+    cleanedHost = `http://${cleanedHost}`;
+  }
+  cleanedHost = cleanedHost.replace(/\/+$/, '');
+
+  currentOllamaBaseUrl = cleanedHost;
+  const statusResult = await fetchOllamaTags(currentOllamaBaseUrl);
+  const pulled = getPulledModels();
+
+  res.json({
+    success: true,
+    status: {
+      connected: statusResult.connected,
+      host: currentOllamaBaseUrl,
+      version: statusResult.version,
+      installedCount: statusResult.models.length,
+      pulledCount: pulled.length,
+      error: statusResult.error,
+    },
+  });
+});
+
+// Auto-start Ollama daemon
+app.post('/api/ollama/autostart', async (req, res) => {
+  const started = await ensureOllamaDaemon();
+  const statusResult = await fetchOllamaTags(currentOllamaBaseUrl);
+  res.json({
+    success: started || statusResult.connected,
+    message: statusResult.connected
+      ? 'Ollama daemon is active and responding!'
+      : 'Attempted to start Ollama daemon.',
+    status: statusResult,
+  });
+});
+
+// Auto-install Ollama on Linux/Ubuntu if not installed
+app.post('/api/ollama/autoinstall', (req, res) => {
+  exec('curl -fsSL https://ollama.com/install.sh | sh', async (err, stdout, stderr) => {
+    if (err) {
+      return res.status(500).json({
+        error: `Installation failed: ${err.message}`,
+        details: stderr,
+      });
+    }
+    // Now start the daemon
+    await ensureOllamaDaemon();
+    const statusResult = await fetchOllamaTags(currentOllamaBaseUrl);
+    res.json({
+      success: true,
+      message: 'Ollama installed and started successfully!',
+      status: statusResult,
+      stdout,
+    });
   });
 });
 
@@ -984,6 +1115,9 @@ app.get('/api/python/download', (req, res) => {
 });
 
 async function startServer() {
+  // Automatically ensure local Ollama daemon is started if installed
+  ensureOllamaDaemon().catch((e) => console.warn('[ABAH CHAT] Ollama autostart check:', e.message));
+
   // Vite middleware for dev or static serving for production
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
