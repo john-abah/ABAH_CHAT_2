@@ -21,7 +21,8 @@ const PULLED_MODELS_FILE = path.join(process.cwd(), 'pulled_models.json');
 // Ollama Base URL configuration (configurable via environment or in-app settings)
 let currentOllamaBaseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:11434';
 
-app.use(express.json());
+app.use(express.json({ limit: '25mb' }));
+app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
 // Persistent Pulled Models Storage
 const DEFAULT_INITIAL_PULLED: PulledOllamaModel[] = [
@@ -276,12 +277,30 @@ async function fetchOnlineOllamaModels(query?: string): Promise<OnlineOllamaMode
   return uniqueFallback;
 }
 
+interface ChatAttachment {
+  name: string;
+  type: string;
+  size: number;
+  content?: string;
+  isImage?: boolean;
+}
+
+interface SearchSource {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
 interface ChatMessage {
+  id?: string;
   content: string;
   source: 'user' | 'chatter';
   type: 'UserMessage' | 'AssistantMessage';
   thought?: string | null;
   timestamp?: string;
+  attachments?: ChatAttachment[];
+  sources?: SearchSource[];
+  searchQuery?: string;
 }
 
 interface MemoryState {
@@ -931,25 +950,311 @@ app.post('/api/memory/clear', (req, res) => {
   res.json({ status: 'cleared', memory: freshMemory });
 });
 
-// 8. Send chat message with Ollama first & memory persistence
+// 8. Import chat history into persistent memory (supports JSON, text transcripts, Markdown)
+app.post('/api/memory/import', (req, res) => {
+  try {
+    const { messages, memory, mode = 'merge' } = req.body;
+
+    let incomingMessages: any[] = [];
+    if (Array.isArray(messages)) {
+      incomingMessages = messages;
+    } else if (memory && memory.llm_context && Array.isArray(memory.llm_context.messages)) {
+      incomingMessages = memory.llm_context.messages;
+    } else {
+      return res.status(400).json({ error: 'No valid messages array found to import.' });
+    }
+
+    const state = getMemoryState();
+    const sanitized: ChatMessage[] = [];
+
+    for (const msg of incomingMessages) {
+      if (!msg) continue;
+      const content = typeof msg.content === 'string' ? msg.content.trim() : '';
+      if (!content && (!msg.attachments || msg.attachments.length === 0)) continue;
+
+      const source: 'user' | 'chatter' =
+        msg.source === 'user' || msg.role === 'user' ? 'user' : 'chatter';
+      const type: 'UserMessage' | 'AssistantMessage' =
+        source === 'user' ? 'UserMessage' : 'AssistantMessage';
+
+      sanitized.push({
+        id: msg.id || `import-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+        content,
+        source,
+        type,
+        thought: msg.thought || null,
+        timestamp: msg.timestamp || new Date().toISOString(),
+        attachments: Array.isArray(msg.attachments) ? msg.attachments : undefined,
+        sources: Array.isArray(msg.sources) ? msg.sources : undefined,
+        searchQuery: msg.searchQuery,
+      });
+    }
+
+    if (sanitized.length === 0) {
+      return res.status(400).json({
+        error: 'No valid messages could be parsed from the provided input.',
+      });
+    }
+
+    if (mode === 'replace') {
+      state.llm_context.messages = sanitized;
+    } else {
+      state.llm_context.messages.push(...sanitized);
+    }
+
+    saveMemoryState(state);
+
+    res.json({
+      success: true,
+      mode,
+      importedCount: sanitized.length,
+      totalCount: state.llm_context.messages.length,
+      memory: state,
+    });
+  } catch (err: any) {
+    console.error('Error in /api/memory/import:', err);
+    res.status(500).json({ error: err.message || 'Failed to import messages.' });
+  }
+});
+
+// Free Internet Search Engine (DuckDuckGo + Wikipedia + HackerNews)
+async function searchFreeInternet(query: string): Promise<SearchSource[]> {
+  const sources: SearchSource[] = [];
+  const cleanQuery = query.replace(/[^\w\s\d.-]/gi, ' ').trim();
+  if (!cleanQuery) return sources;
+
+  const sanitizeSnippet = (text: string): string => {
+    return text
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/\s+/g, ' ')
+      .trim();
+  };
+
+  const tasks: Promise<void>[] = [];
+
+  // 1. DuckDuckGo Instant Answer API
+  tasks.push(
+    (async () => {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 4000);
+
+        const ddgRes = await fetch(
+          `https://api.duckduckgo.com/?q=${encodeURIComponent(cleanQuery)}&format=json&no_html=1&skip_disambig=1`,
+          {
+            signal: controller.signal,
+            headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+          }
+        );
+        clearTimeout(timeout);
+
+        if (ddgRes.ok) {
+          const data = (await ddgRes.json()) as any;
+          if (data.AbstractText && data.AbstractURL) {
+            sources.push({
+              title: data.Heading || cleanQuery,
+              url: data.AbstractURL,
+              snippet: data.AbstractText,
+            });
+          }
+          if (Array.isArray(data.RelatedTopics)) {
+            for (const topic of data.RelatedTopics) {
+              if (topic.Text && topic.FirstURL && sources.length < 5) {
+                sources.push({
+                  title: topic.Text.split(' - ')[0] || topic.Text.slice(0, 60),
+                  url: topic.FirstURL,
+                  snippet: topic.Text,
+                });
+              }
+            }
+          }
+        }
+      } catch {
+        // Ignore fallback
+      }
+    })()
+  );
+
+  // 2. Wikipedia Search API (Free, high-speed, encyclopedic facts)
+  tasks.push(
+    (async () => {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 4000);
+
+        const wikiRes = await fetch(
+          `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(cleanQuery)}&utf8=&format=json&srlimit=4`,
+          {
+            signal: controller.signal,
+            headers: { 'User-Agent': 'AbahChatApp/1.0 (free internet search)' },
+          }
+        );
+        clearTimeout(timeout);
+
+        if (wikiRes.ok) {
+          const data = (await wikiRes.json()) as any;
+          const searchResults = data?.query?.search;
+          if (Array.isArray(searchResults)) {
+            for (const item of searchResults) {
+              const title = item.title;
+              const url = `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, '_'))}`;
+              const snippet = sanitizeSnippet(item.snippet);
+              sources.push({
+                title,
+                url,
+                snippet,
+              });
+            }
+          }
+        }
+      } catch {
+        // Ignore
+      }
+    })()
+  );
+
+  // 3. Hacker News Algolia Search API (Real-time tech, developer news, models)
+  tasks.push(
+    (async () => {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 4000);
+
+        const hnRes = await fetch(
+          `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(cleanQuery)}&tags=story&hitsPerPage=4`,
+          {
+            signal: controller.signal,
+          }
+        );
+        clearTimeout(timeout);
+
+        if (hnRes.ok) {
+          const data = (await hnRes.json()) as any;
+          if (Array.isArray(data.hits)) {
+            for (const hit of data.hits) {
+              const title = hit.title || hit.story_title;
+              const url = hit.url || `https://news.ycombinator.com/item?id=${hit.objectID}`;
+              if (title && url) {
+                const snippet = hit.story_text
+                  ? sanitizeSnippet(hit.story_text).slice(0, 200)
+                  : `Hacker News tech community discussion with ${hit.points || 0} points and ${hit.num_comments || 0} comments.`;
+                sources.push({
+                  title,
+                  url,
+                  snippet,
+                });
+              }
+            }
+          }
+        }
+      } catch {
+        // Ignore
+      }
+    })()
+  );
+
+  await Promise.allSettled(tasks);
+
+  // Deduplicate sources by URL
+  const seenUrls = new Set<string>();
+  const uniqueSources: SearchSource[] = [];
+  for (const src of sources) {
+    if (!seenUrls.has(src.url) && src.title && src.snippet) {
+      seenUrls.add(src.url);
+      uniqueSources.push(src);
+    }
+  }
+
+  return uniqueSources.slice(0, 5);
+}
+
+// 9. Free Internet Search API endpoint
+app.all('/api/search', async (req, res) => {
+  try {
+    const query = req.method === 'POST' ? req.body.query : req.query.q;
+    if (!query || typeof query !== 'string') {
+      return res.status(400).json({ error: 'Search query is required' });
+    }
+    const results = await searchFreeInternet(query);
+    res.json({ query, results, count: results.length });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message || 'Search failed' });
+  }
+});
+
+// 10. Send chat message with Ollama first, attachments inference, and web search grounding
 app.post('/api/chat', async (req, res) => {
   try {
-    const { message, model = 'gemma2:2b' } = req.body;
-    if (!message || typeof message !== 'string') {
-      return res.status(400).json({ error: 'Message is required' });
+    const { message, model = 'gemma2:2b', attachments, webSearch } = req.body;
+    if ((!message || typeof message !== 'string') && (!attachments || attachments.length === 0)) {
+      return res.status(400).json({ error: 'Message or file attachments are required' });
     }
+
+    const effectiveMessage = (message && typeof message === 'string' ? message.trim() : '') ||
+      'Please inspect and analyze the attached file(s).';
 
     const state = getMemoryState();
     const now = new Date().toISOString();
 
+    // Sanitize attachments for memory storage (prevent massive memory.json by stripping excessively large base64 if needed)
+    const sanitizedAttachments: ChatAttachment[] = Array.isArray(attachments)
+      ? attachments.map((att: any) => ({
+          name: String(att.name || 'file'),
+          type: String(att.type || 'text/plain'),
+          size: Number(att.size || 0),
+          isImage: Boolean(att.isImage),
+          content: att.content ? String(att.content) : undefined,
+        }))
+      : [];
+
     // Append new user message to state
     const userMsg: ChatMessage = {
-      content: message,
+      id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+      content: effectiveMessage,
       source: 'user',
       type: 'UserMessage',
       timestamp: now,
+      attachments: sanitizedAttachments.length > 0 ? sanitizedAttachments : undefined,
     };
     state.llm_context.messages.push(userMsg);
+
+    // Live Web Search Grounding
+    let searchSources: SearchSource[] = [];
+    if (webSearch) {
+      try {
+        searchSources = await searchFreeInternet(effectiveMessage);
+      } catch (searchErr: any) {
+        console.warn('[ABAH CHAT] Web search warning:', searchErr.message);
+      }
+    }
+
+    // Prepare Model Prompt Augmented with Attachments & Web Grounding
+    let augmentedUserPrompt = effectiveMessage;
+
+    if (sanitizedAttachments.length > 0) {
+      const textFiles = sanitizedAttachments.filter((a) => !a.isImage && a.content);
+      if (textFiles.length > 0) {
+        const fileContextBlocks = textFiles
+          .map((a) => `[ATTACHED FILE: ${a.name} (${a.type})]\n\`\`\`\n${a.content}\n\`\`\``)
+          .join('\n\n');
+        augmentedUserPrompt = `${fileContextBlocks}\n\n[USER INSTRUCTION]:\n${augmentedUserPrompt}`;
+      }
+    }
+
+    if (searchSources.length > 0) {
+      const sourcesBlock = searchSources
+        .map(
+          (s, idx) =>
+            `[Source ${idx + 1}]: ${s.title}\nURL: ${s.url}\nSummary: ${s.snippet}`
+        )
+        .join('\n\n');
+      augmentedUserPrompt = `[LIVE FREE INTERNET SEARCH RESULTS FOR: "${effectiveMessage}"]\n${sourcesBlock}\n\n[INSTRUCTIONS]: You have live access to the internet. Answer the user's question accurately based on these up-to-date search results and your knowledge. Cite the source titles or URLs when helpful.\n\n[USER QUESTION]:\n${augmentedUserPrompt}`;
+    }
 
     let replyText = '';
     let providerUsed = 'ollama';
@@ -961,23 +1266,35 @@ app.post('/api/chat', async (req, res) => {
 
     const isExplicitGemini = model.startsWith('gemini');
 
+    // Extract base64 images for Ollama vision models
+    const imageAttachments = sanitizedAttachments.filter((a) => a.isImage && a.content);
+    const base64Images = imageAttachments.map((img) => {
+      const parts = img.content!.split(',');
+      return parts.length > 1 ? parts[1] : parts[0];
+    });
+
     // If it's an Ollama model (default and primary requirement)
     if (!isExplicitGemini) {
       try {
-        const ollamaMessages = [
+        const ollamaMessages: any[] = [
           {
             role: 'system',
             content:
-              'You are a personal loyal companion. You answer as briefly and as concisely as possible. You have persistent memory of past conversations.',
+              'You are chatter, a personal loyal companion. You answer as concisely, directly, and accurately as possible. You have persistent memory of past conversations, can inspect attached files and code, and have live internet search grounding.',
           },
-          ...contextHistory.map((m) => ({
+          ...contextHistory.slice(0, -1).map((m) => ({
             role: m.source === 'user' ? 'user' : 'assistant',
             content: m.content,
           })),
+          {
+            role: 'user',
+            content: augmentedUserPrompt,
+            ...(base64Images.length > 0 ? { images: base64Images } : {}),
+          },
         ];
 
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout for local inference
+        const timeoutId = setTimeout(() => controller.abort(), 90000); // 90s timeout for local inference
 
         const ollamaRes = await fetch(`${currentOllamaBaseUrl}/api/chat`, {
           method: 'POST',
@@ -1007,7 +1324,7 @@ app.post('/api/chat', async (req, res) => {
 
           // Check if model needs to be pulled
           if (errMsg.includes('not found') || errMsg.includes('pull')) {
-            replyText = `Ollama model "${model}" is not yet downloaded on your Ollama server (${currentOllamaBaseUrl}). Run:\n\n\`ollama pull ${model}\`\n\nor click "Pull Model" in the model selector. (Your message is safely recorded in persistent memory.)`;
+            replyText = `Ollama model "${model}" is not yet downloaded on your Ollama server (${currentOllamaBaseUrl}). Run:\n\n\`ollama pull ${model}\`\n\nor click "Pull Model" in the model selector. (Your message and attachments are safely recorded in persistent memory.)`;
           } else {
             console.warn(`Ollama responded with error: ${errMsg}`);
             throw new Error(errMsg);
@@ -1021,17 +1338,18 @@ app.post('/api/chat', async (req, res) => {
         if (ai) {
           try {
             const conversationHistoryText = contextHistory
+              .slice(0, -1)
               .map((m) => `${m.source === 'user' ? 'User' : 'Chatter'}: ${m.content}`)
               .join('\n');
 
-            const promptWithContext = `Conversation History:\n${conversationHistoryText}\n\nRespond as chatter (personal loyal companion) to the latest user message: "${message}".`;
+            const promptWithContext = `Conversation History:\n${conversationHistoryText}\n\nUser Message & Context:\n${augmentedUserPrompt}`;
 
             const geminiRes = await ai.models.generateContent({
               model: 'gemini-2.5-flash',
               contents: promptWithContext,
               config: {
                 systemInstruction:
-                  'You are a personal loyal companion. You answer as briefly and as concisely as possible. You have persistent memory of past conversations.',
+                  'You are a personal loyal companion. You answer concisely and accurately. You have persistent memory of past conversations, can analyze attached files, and cite live web search results.',
                 temperature: 0.2,
               },
             });
@@ -1043,12 +1361,22 @@ app.post('/api/chat', async (req, res) => {
           }
         }
 
-        // Fallback option 2: Intelligent local companion context parser if Ollama is unreachable
+        // Fallback option 2: Intelligent local companion context synthesizer if Ollama is unreachable
         if (!replyText) {
-          const lower = message.toLowerCase();
+          const lower = effectiveMessage.toLowerCase();
           const pastMessages = state.llm_context.messages.slice(0, -1);
 
-          if (lower.includes('leave off') || lower.includes('last time') || lower.includes('where did we')) {
+          if (searchSources.length > 0) {
+            const listSources = searchSources
+              .map((s, i) => `${i + 1}. **${s.title}**: ${s.snippet} ([Link](${s.url}))`)
+              .join('\n\n');
+            replyText = `Here is what I found on the internet for **"${effectiveMessage}"**:\n\n${listSources}\n\n*(Saved to persistent memory. Note: Ollama at ${currentOllamaBaseUrl} is offline, so this answer was gathered via live free web search.)*`;
+          } else if (sanitizedAttachments.length > 0) {
+            const filesList = sanitizedAttachments
+              .map((f) => `• \`${f.name}\` (${f.type}, ${(f.size / 1024).toFixed(1)} KB)`)
+              .join('\n');
+            replyText = `I have received and logged your attached file(s) into persistent conversation memory:\n\n${filesList}\n\nWhen your local Ollama model is connected, it will inference directly on this content.`;
+          } else if (lower.includes('leave off') || lower.includes('last time') || lower.includes('where did we')) {
             if (pastMessages.length === 0) {
               replyText = "We haven't recorded any previous conversations yet! This is our first session together.";
             } else {
@@ -1063,7 +1391,7 @@ app.post('/api/chat', async (req, res) => {
               replyText = `We have recorded ${pastMessages.length} total messages. Past exchanges covered topics including ${pastMessages.slice(-2).map((m) => `"${m.content.slice(0, 40)}..."`).join(' and ')}.`;
             }
           } else if (lower.includes('favorite') || lower.includes('remember')) {
-            replyText = `Noted and saved! I've written "${message}" into our persistent memory.json file.`;
+            replyText = `Noted and saved! I've written "${effectiveMessage}" into our persistent memory.json file.`;
           } else {
             replyText = `Your message has been logged to persistent memory. [Note: Ollama at ${currentOllamaBaseUrl} is unreachable. Ensure 'ollama serve' is running or configure host in Settings.]`;
           }
@@ -1075,17 +1403,18 @@ app.post('/api/chat', async (req, res) => {
       const ai = getAI();
       if (ai) {
         const conversationHistoryText = contextHistory
+          .slice(0, -1)
           .map((m) => `${m.source === 'user' ? 'User' : 'Chatter'}: ${m.content}`)
           .join('\n');
 
-        const promptWithContext = `Conversation History:\n${conversationHistoryText}\n\nRespond as chatter (personal loyal companion) to the latest user message: "${message}".`;
+        const promptWithContext = `Conversation History:\n${conversationHistoryText}\n\nUser Message & Context:\n${augmentedUserPrompt}`;
 
         const response = await ai.models.generateContent({
           model: 'gemini-2.5-flash',
           contents: promptWithContext,
           config: {
             systemInstruction:
-              'You are a personal loyal companion. You answer as briefly and as concisely as possible. You have persistent memory of past conversations.',
+              'You are a personal loyal companion. You answer concisely and accurately. You have persistent memory of past conversations, can analyze attached files, and cite live web search results.',
             temperature: 0.2,
           },
         });
@@ -1099,11 +1428,14 @@ app.post('/api/chat', async (req, res) => {
 
     // Append chatter reply to persistent state
     const assistantMsg: ChatMessage = {
+      id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
       content: replyText,
       source: 'chatter',
       type: 'AssistantMessage',
       thought: null,
       timestamp: new Date().toISOString(),
+      sources: searchSources.length > 0 ? searchSources : undefined,
+      searchQuery: searchSources.length > 0 ? effectiveMessage : undefined,
     };
     state.llm_context.messages.push(assistantMsg);
 
@@ -1115,6 +1447,7 @@ app.post('/api/chat', async (req, res) => {
       memory: state,
       provider: providerUsed,
       model,
+      sources: searchSources.length > 0 ? searchSources : undefined,
     });
   } catch (err: any) {
     console.error('Error in /api/chat:', err);

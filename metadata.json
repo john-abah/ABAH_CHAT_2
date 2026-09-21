@@ -1,6 +1,6 @@
 {
   "name": "ABAH CHAT",
-  "description": "Persistent memory companion and Ollama model hub with online model browsing, size selection, real-time downloading, and context retention",
+  "description": "Persistent memory companion and Ollama hub with chat history import, file attachments inference, free internet search grounding, and online model management",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

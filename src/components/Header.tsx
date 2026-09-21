@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot, Database, Trash2, RefreshCw, Cpu, Globe, HardDrive } from 'lucide-react';
+import { Bot, Database, Trash2, RefreshCw, Cpu, Globe, HardDrive, UploadCloud } from 'lucide-react';
 import { OllamaStatus } from '../types';
 
 interface HeaderProps {
@@ -11,6 +11,7 @@ interface HeaderProps {
   onOpenSettings: () => void;
   onClearMemory: () => void;
   onToggleMemoryView: () => void;
+  onOpenImport?: () => void;
   isMemoryOpen: boolean;
   isClearing: boolean;
 }
@@ -24,6 +25,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSettings,
   onClearMemory,
   onToggleMemoryView,
+  onOpenImport,
   isMemoryOpen,
   isClearing,
 }) => {
@@ -125,6 +127,19 @@ export const Header: React.FC<HeaderProps> = ({
               {messageCount}
             </span>
           </button>
+
+          {/* Import Chat History */}
+          {onOpenImport && (
+            <button
+              id="header-import-chat-btn"
+              onClick={onOpenImport}
+              className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs rounded-xl border border-zinc-700/60 bg-zinc-800 hover:bg-indigo-950/40 hover:text-indigo-300 hover:border-indigo-800/50 text-zinc-300 transition-colors shadow-sm"
+              title="Import chat histories from file (.json, .txt, .md)"
+            >
+              <UploadCloud className="w-3.5 h-3.5 text-indigo-400" />
+              <span className="hidden sm:inline">Import</span>
+            </button>
+          )}
 
           {/* Clear Memory */}
           <button

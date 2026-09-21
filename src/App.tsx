@@ -3,9 +3,10 @@ import { Header } from './components/Header';
 import { ChatWindow } from './components/ChatWindow';
 import { ChatInput } from './components/ChatInput';
 import { MemoryInspector } from './components/MemoryInspector';
+import { ImportChatModal } from './components/ImportChatModal';
 import { OllamaModelPicker } from './components/OllamaModelPicker';
 import { OllamaSettingsModal } from './components/OllamaSettingsModal';
-import { MemoryState, OllamaStatus, PulledOllamaModel } from './types';
+import { MemoryState, OllamaStatus, PulledOllamaModel, ChatAttachment } from './types';
 import { AlertCircle, CheckCircle2 } from 'lucide-react';
 
 export default function App() {
@@ -16,6 +17,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isClearing, setIsClearing] = useState<boolean>(false);
   const [isMemoryOpen, setIsMemoryOpen] = useState<boolean>(false);
+  const [isImportOpen, setIsImportOpen] = useState<boolean>(false);
   const [isModelPickerOpen, setIsModelPickerOpen] = useState<boolean>(false);
   const [modelPickerTab, setModelPickerTab] = useState<'online' | 'pulled'>('online');
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
@@ -108,8 +110,12 @@ export default function App() {
     }
   };
 
-  const handleSendMessage = async (text: string) => {
-    if (!text.trim()) return;
+  const handleSendMessage = async (
+    text: string,
+    attachments?: ChatAttachment[],
+    webSearch?: boolean
+  ) => {
+    if (!text.trim() && (!attachments || attachments.length === 0)) return;
 
     setErrorNotice(null);
     setIsLoading(true);
@@ -129,6 +135,7 @@ export default function App() {
               source: 'user',
               type: 'UserMessage',
               timestamp: optimisticTimestamp,
+              attachments: attachments && attachments.length > 0 ? attachments : undefined,
             },
           ],
         },
@@ -142,6 +149,8 @@ export default function App() {
         body: JSON.stringify({
           message: text,
           model: selectedModel,
+          attachments,
+          webSearch,
         }),
       });
 
@@ -160,6 +169,12 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleImportSuccess = (newMemory: MemoryState, count: number) => {
+    setMemory(newMemory);
+    setSuccessNotice(`Successfully imported ${count} message${count === 1 ? '' : 's'} into persistent memory.`);
+    setTimeout(() => setSuccessNotice(null), 5000);
   };
 
   const handleClearMemory = async () => {
@@ -197,6 +212,7 @@ export default function App() {
         onOpenSettings={() => setIsSettingsOpen(true)}
         onClearMemory={handleClearMemory}
         onToggleMemoryView={() => setIsMemoryOpen((v) => !v)}
+        onOpenImport={() => setIsImportOpen(true)}
         isMemoryOpen={isMemoryOpen}
         isClearing={isClearing}
       />
@@ -274,6 +290,14 @@ export default function App() {
         memory={memory}
         isOpen={isMemoryOpen}
         onClose={() => setIsMemoryOpen(false)}
+        onOpenImport={() => setIsImportOpen(true)}
+      />
+
+      {/* Import Chat History Modal */}
+      <ImportChatModal
+        isOpen={isImportOpen}
+        onClose={() => setIsImportOpen(false)}
+        onImportSuccess={handleImportSuccess}
       />
     </div>
   );

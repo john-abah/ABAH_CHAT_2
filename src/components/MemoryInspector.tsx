@@ -1,17 +1,19 @@
 import React, { useState } from 'react';
-import { X, Copy, Check, Download, Database, FileCode2 } from 'lucide-react';
+import { X, Copy, Check, Download, UploadCloud, Database, FileCode2 } from 'lucide-react';
 import { MemoryState } from '../types';
 
 interface MemoryInspectorProps {
   memory: MemoryState | null;
   isOpen: boolean;
   onClose: () => void;
+  onOpenImport?: () => void;
 }
 
 export const MemoryInspector: React.FC<MemoryInspectorProps> = ({
   memory,
   isOpen,
   onClose,
+  onOpenImport,
 }) => {
   const [copied, setCopied] = useState(false);
 
@@ -78,6 +80,21 @@ export const MemoryInspector: React.FC<MemoryInspectorProps> = ({
               <Download className="w-3.5 h-3.5" />
               <span>Export</span>
             </button>
+
+            {onOpenImport && (
+              <button
+                id="import-memory-btn"
+                onClick={() => {
+                  onClose();
+                  onOpenImport();
+                }}
+                className="px-2.5 py-1.5 rounded-lg bg-indigo-950/60 hover:bg-indigo-900/80 text-indigo-300 text-xs flex items-center gap-1.5 border border-indigo-700/60 transition-colors"
+                title="Import chat history into memory"
+              >
+                <UploadCloud className="w-3.5 h-3.5 text-indigo-400" />
+                <span>Import</span>
+              </button>
+            )}
 
             <button
               id="close-memory-btn"

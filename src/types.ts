@@ -1,3 +1,17 @@
+export interface ChatAttachment {
+  name: string;
+  type: string;
+  size: number;
+  content?: string; // Text content or Base64 data URL
+  isImage?: boolean;
+}
+
+export interface SearchSource {
+  title: string;
+  url: string;
+  snippet: string;
+}
+
 export interface ChatMessage {
   id?: string;
   content: string;
@@ -5,6 +19,9 @@ export interface ChatMessage {
   type: 'UserMessage' | 'AssistantMessage';
   thought?: string | null;
   timestamp?: string;
+  attachments?: ChatAttachment[];
+  sources?: SearchSource[];
+  searchQuery?: string;
 }
 
 export interface MemoryState {
