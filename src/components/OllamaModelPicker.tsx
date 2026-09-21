@@ -168,9 +168,12 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
   // Selected tag per model card (e.g. 'qwen2.5' -> '8b', '14b', etc.)
   const [selectedTags, setSelectedTags] = useState<Record<string, string>>({});
 
-  // Real-time pulling state tracking: modelTag -> { status, percent, completed, total }
+  // Real-time pulling state tracking: modelTag -> { status, percent, completed, total, isDone }
   const [pullingModels, setPullingModels] = useState<
-    Record<string, { status: string; percent: number; completed?: number; total?: number }>
+    Record<
+      string,
+      { status: string; percent: number; completed?: number; total?: number; isDone?: boolean }
+    >
   >({});
   const [notification, setNotification] = useState<{ text: string; isError?: boolean } | null>(
     null
@@ -297,16 +300,30 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
 
             if (data.isDone) {
               clearInterval(pollInterval);
-              setPullingModels((prev) => {
-                const next = { ...prev };
-                delete next[fullModelTag];
-                return next;
-              });
+              setPullingModels((prev) => ({
+                ...prev,
+                [fullModelTag]: {
+                  status: 'Pull completed & verified!',
+                  percent: 100,
+                  completed: data.completed,
+                  total: data.total,
+                  isDone: true,
+                },
+              }));
               setNotification({
                 text: `Model ${fullModelTag} downloaded successfully and ready for chatter!`,
               });
               loadPulledModels();
               loadOnlineModels();
+
+              // Clear in-flight indicator after delay so user sees 100% completion
+              setTimeout(() => {
+                setPullingModels((prev) => {
+                  const next = { ...prev };
+                  delete next[fullModelTag];
+                  return next;
+                });
+              }, 4000);
             }
           }
         } catch {
@@ -339,7 +356,7 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
       onSelectModel(fullTag);
       onClose();
     } else {
-      // Inform the user and ask if they would like to pull the model!
+      // Inform the user and show download modal with live loading bar
       setUnpulledPrompt({
         baseModelId,
         modelName,
@@ -349,21 +366,11 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
     }
   };
 
-  // Confirm pull from unpulled prompt
+  // Confirm pull from unpulled prompt (keeps dialog open so user can observe loading bar)
   const handleConfirmPullFromPrompt = () => {
     if (!unpulledPrompt) return;
-    const { baseModelId, tag, fullTag } = unpulledPrompt;
-    setUnpulledPrompt(null);
+    const { baseModelId, tag } = unpulledPrompt;
     handlePullModel(baseModelId, tag);
-    // Switch to pulled tab or stay to observe loading bar
-  };
-
-  // Select anyway (cloud / remote proxy mode)
-  const handleSelectAnyway = () => {
-    if (!unpulledPrompt) return;
-    onSelectModel(unpulledPrompt.fullTag);
-    setUnpulledPrompt(null);
-    onClose();
   };
 
   // Confirm and delete pulled model
@@ -1098,82 +1105,232 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
         </div>
       </div>
 
-      {/* CONFIRMATION DIALOG: Model Not Available Locally */}
-      {unpulledPrompt && (
-        <div
-          id="unpulled-model-dialog"
-          className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-in fade-in"
-        >
-          <div className="bg-zinc-900 border border-amber-500/40 rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-4 ring-1 ring-amber-500/20">
-            <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-xl bg-amber-950/60 border border-amber-800/80 text-amber-400 flex items-center justify-center shrink-0">
-                <AlertTriangle className="w-5 h-5" />
+      {/* CONFIRMATION & LIVE PULL PROGRESS DIALOG: Does not change until user leaves or process finishes */}
+      {unpulledPrompt && (() => {
+        const activePromptPull =
+          pullingModels[unpulledPrompt.fullTag] ||
+          pullingModels[unpulledPrompt.baseModelId] ||
+          (isModelAvailableLocally(unpulledPrompt.fullTag)
+            ? { status: 'Model ready & available locally', percent: 100, isDone: true }
+            : null);
+        const isPullDone = Boolean(activePromptPull && (activePromptPull.isDone || activePromptPull.percent === 100));
+        const isPullingActive = Boolean(activePromptPull && !isPullDone);
+
+        return (
+          <div
+            id="unpulled-model-dialog"
+            className="fixed inset-0 z-60 flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm animate-in fade-in"
+          >
+            <div
+              className={`bg-zinc-900 border rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-4 ring-1 transition-all ${
+                isPullDone
+                  ? 'border-emerald-500/50 ring-emerald-500/20'
+                  : isPullingActive
+                  ? 'border-amber-500/50 ring-amber-500/20'
+                  : 'border-zinc-700/80 ring-white/10'
+              }`}
+            >
+              {/* Dialog Header */}
+              <div className="flex items-start gap-3">
+                <div
+                  className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 ${
+                    isPullDone
+                      ? 'bg-emerald-950/60 border-emerald-800 text-emerald-400'
+                      : isPullingActive
+                      ? 'bg-amber-950/60 border-amber-800 text-amber-400'
+                      : 'bg-indigo-950/60 border-indigo-800 text-indigo-400'
+                  }`}
+                >
+                  {isPullDone ? (
+                    <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                  ) : isPullingActive ? (
+                    <RefreshCw className="w-5 h-5 text-amber-400 animate-spin" />
+                  ) : (
+                    <Download className="w-5 h-5 text-indigo-400" />
+                  )}
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-sm font-semibold text-zinc-100">
+                    {isPullDone
+                      ? 'Download Complete & Ready!'
+                      : isPullingActive
+                      ? 'Downloading Model Weights...'
+                      : 'Pull Required to Chat'}
+                  </h3>
+                  <p className="text-xs text-zinc-400 mt-0.5">
+                    {isPullDone ? (
+                      <span>
+                        <span className="font-mono text-emerald-300 font-semibold">{unpulledPrompt.fullTag}</span> is downloaded and verified.
+                      </span>
+                    ) : isPullingActive ? (
+                      <span>
+                        Pulling <span className="font-mono text-amber-300 font-semibold">{unpulledPrompt.fullTag}</span> to your local machine.
+                      </span>
+                    ) : (
+                      <span>
+                        You selected <span className="font-mono text-amber-300 font-semibold">{unpulledPrompt.fullTag}</span>. Pull to start chatting.
+                      </span>
+                    )}
+                  </p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-sm font-semibold text-zinc-100">
-                  Model Not Available Locally
-                </h3>
-                <p className="text-xs text-zinc-400 mt-1">
-                  You selected{' '}
-                  <span className="font-mono text-amber-300 font-semibold">
-                    {unpulledPrompt.fullTag}
+
+              {/* Model Info Summary */}
+              <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800 text-xs space-y-1.5 text-zinc-300">
+                <div className="flex justify-between">
+                  <span className="text-zinc-500">Model:</span>
+                  <span className="font-medium text-zinc-200">{unpulledPrompt.modelName}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-zinc-500">Parameter Size:</span>
+                  <span className="font-mono text-indigo-300 font-semibold">
+                    {unpulledPrompt.tag}
                   </span>
-                  , but this model has not been pulled to your local machine yet.
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-zinc-500">Status:</span>
+                  <span
+                    className={`font-medium ${
+                      isPullDone
+                        ? 'text-emerald-400'
+                        : isPullingActive
+                        ? 'text-amber-300'
+                        : 'text-zinc-400'
+                    }`}
+                  >
+                    {isPullDone
+                      ? 'Downloaded & Ready'
+                      : isPullingActive
+                      ? (activePromptPull?.status || 'Downloading...')
+                      : 'Download Required'}
+                  </span>
+                </div>
+              </div>
+
+              {/* LIVE LOADING BAR: Stays persistent while download is active or done */}
+              {activePromptPull ? (
+                <div className="space-y-2 bg-zinc-950/80 p-3.5 rounded-xl border border-zinc-800/90">
+                  <div className="flex items-center justify-between text-xs">
+                    <div className="flex items-center gap-2">
+                      {isPullDone ? (
+                        <Check className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      ) : (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400 shrink-0" />
+                      )}
+                      <span className={`font-semibold truncate ${isPullDone ? 'text-emerald-300' : 'text-amber-300'}`}>
+                        {activePromptPull.status}
+                      </span>
+                    </div>
+                    <span className="font-mono font-bold text-xs shrink-0 text-zinc-200">
+                      {activePromptPull.percent}%
+                    </span>
+                  </div>
+
+                  {/* Animated Progress Bar */}
+                  <div className="w-full bg-zinc-800 rounded-full h-2.5 overflow-hidden shadow-inner">
+                    <div
+                      className={`h-2.5 rounded-full transition-all duration-300 ease-out ${
+                        isPullDone
+                          ? 'bg-emerald-400'
+                          : 'bg-gradient-to-r from-amber-500 via-amber-400 to-emerald-400'
+                      }`}
+                      style={{ width: `${Math.max(8, activePromptPull.percent)}%` }}
+                    />
+                  </div>
+
+                  {/* Byte download stats */}
+                  {activePromptPull.completed && activePromptPull.total ? (
+                    <div className="flex justify-between text-[11px] text-zinc-400 font-mono">
+                      <span>{Math.round(activePromptPull.completed / 1024 / 1024)} MB downloaded</span>
+                      <span>Total: {Math.round(activePromptPull.total / 1024 / 1024)} MB</span>
+                    </div>
+                  ) : null}
+
+                  <p className="text-[11px] text-zinc-400 pt-0.5">
+                    {isPullDone
+                      ? 'Download complete! You can start chatting with this model now.'
+                      : 'Download is actively in progress. This page stays here until the process finishes, or you can choose to leave anytime.'}
+                  </p>
+                </div>
+              ) : (
+                <p className="text-xs text-zinc-400">
+                  Click below to pull this model. The live loading bar will track progress directly on this screen until the download finishes.
                 </p>
-              </div>
-            </div>
+              )}
 
-            <div className="bg-zinc-950 p-3 rounded-xl border border-zinc-800 text-xs space-y-1 text-zinc-300">
-              <div className="flex justify-between">
-                <span className="text-zinc-500">Model:</span>
-                <span className="font-medium text-zinc-200">{unpulledPrompt.modelName}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-zinc-500">Selected Size:</span>
-                <span className="font-mono text-indigo-300 font-semibold">
-                  {unpulledPrompt.tag}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-zinc-500">Action Required:</span>
-                <span className="text-amber-300 font-medium">Download / Pull Required</span>
-              </div>
-            </div>
-
-            <p className="text-xs text-zinc-400">
-              Would you like to pull and download this model now to begin chatting? You will be able
-              to watch the download progress in real time via the loading bar.
-            </p>
-
-            <div className="flex flex-col gap-2 pt-2">
-              <button
-                id="confirm-pull-download-btn"
-                onClick={handleConfirmPullFromPrompt}
-                className="w-full py-2 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-zinc-950 font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 transition-all"
-              >
-                <Download className="w-4 h-4 text-zinc-950" />
-                <span>Download &amp; Pull {unpulledPrompt.fullTag}</span>
-              </button>
-
-              <div className="flex gap-2">
-                <button
-                  onClick={handleSelectAnyway}
-                  className="flex-1 py-1.5 px-3 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs transition-colors"
-                  title="Select for remote or proxy Ollama instance"
-                >
-                  Select Anyway (Remote)
-                </button>
-                <button
-                  onClick={() => setUnpulledPrompt(null)}
-                  className="py-1.5 px-3 rounded-xl border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 text-xs transition-colors"
-                >
-                  Cancel
-                </button>
+              {/* Action Buttons: No remote proxy options */}
+              <div className="flex flex-col gap-2 pt-1">
+                {isPullDone ? (
+                  <div className="flex gap-2">
+                    <button
+                      id="start-chatting-now-btn"
+                      onClick={() => {
+                        onSelectModel(unpulledPrompt.fullTag);
+                        setUnpulledPrompt(null);
+                        onClose();
+                      }}
+                      className="flex-1 py-2.5 px-4 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-zinc-950 font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 transition-all"
+                    >
+                      <Check className="w-4 h-4 text-zinc-950" />
+                      <span>Start Chatting with {unpulledPrompt.fullTag}</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        onSelectModel(unpulledPrompt.fullTag);
+                        setUnpulledPrompt(null);
+                      }}
+                      className="py-2.5 px-3 rounded-xl border border-zinc-700 hover:bg-zinc-800 text-zinc-300 text-xs transition-colors"
+                      title="Keep Model Hub open"
+                    >
+                      Keep in Hub
+                    </button>
+                  </div>
+                ) : isPullingActive ? (
+                  <div className="flex gap-2">
+                    <button
+                      id="leave-page-bg-btn"
+                      onClick={() => setUnpulledPrompt(null)}
+                      className="flex-1 py-2 px-3 rounded-xl bg-zinc-800 hover:bg-zinc-750 text-zinc-200 text-xs font-medium transition-colors flex items-center justify-center gap-1.5"
+                    >
+                      <span>Continue in Background</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setPullingModels((prev) => {
+                          const next = { ...prev };
+                          delete next[unpulledPrompt.fullTag];
+                          return next;
+                        });
+                        setUnpulledPrompt(null);
+                      }}
+                      className="py-2 px-3 rounded-xl border border-zinc-700 hover:bg-zinc-800 text-zinc-400 hover:text-zinc-200 text-xs transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <button
+                      id="confirm-pull-download-btn"
+                      onClick={handleConfirmPullFromPrompt}
+                      className="flex-1 py-2 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-zinc-950 font-bold text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 transition-all"
+                    >
+                      <Download className="w-4 h-4 text-zinc-950" />
+                      <span>Download &amp; Pull {unpulledPrompt.fullTag}</span>
+                    </button>
+                    <button
+                      onClick={() => setUnpulledPrompt(null)}
+                      className="py-2 px-3 rounded-xl border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800 text-xs transition-colors"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* CONFIRMATION DIALOG: Delete Pulled Model */}
       {deleteConfirmModel && (

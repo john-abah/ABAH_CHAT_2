@@ -796,68 +796,6 @@ app.get('/api/ollama/pull/status', (req, res) => {
   });
 });
 
-// Download Ubuntu .deb package
-app.get('/api/downloads/deb', (req, res) => {
-  const debPath = path.join(process.cwd(), 'public', 'downloads', 'abah-chat_1.0.0_all.deb');
-  if (fs.existsSync(debPath)) {
-    res.setHeader('Content-Disposition', 'attachment; filename="abah-chat_1.0.0_all.deb"');
-    res.setHeader('Content-Type', 'application/vnd.debian.binary-package');
-    return res.sendFile(debPath);
-  }
-  const rootDeb = path.join(process.cwd(), 'abah-chat_1.0.0_all.deb');
-  if (fs.existsSync(rootDeb)) {
-    res.setHeader('Content-Disposition', 'attachment; filename="abah-chat_1.0.0_all.deb"');
-    res.setHeader('Content-Type', 'application/vnd.debian.binary-package');
-    return res.sendFile(rootDeb);
-  }
-  res.status(404).json({ error: 'Debian package not found. Run ./build_deb.sh to compile.' });
-});
-
-// Download Android .apk package
-app.get('/api/downloads/apk', (req, res) => {
-  const apkPath = path.join(process.cwd(), 'public', 'downloads', 'abah-chat-1.0.0.apk');
-  if (fs.existsSync(apkPath)) {
-    res.setHeader('Content-Disposition', 'attachment; filename="abah-chat-1.0.0.apk"');
-    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
-    return res.sendFile(apkPath);
-  }
-  const rootApk = path.join(process.cwd(), 'abah-chat-1.0.0.apk');
-  if (fs.existsSync(rootApk)) {
-    res.setHeader('Content-Disposition', 'attachment; filename="abah-chat-1.0.0.apk"');
-    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
-    return res.sendFile(rootApk);
-  }
-  res.status(404).json({ error: 'Android APK package not found. Run ./build_apk.sh to compile.' });
-});
-
-// Packages information endpoint
-app.get('/api/downloads/info', (req, res) => {
-  const debPath = path.join(process.cwd(), 'public', 'downloads', 'abah-chat_1.0.0_all.deb');
-  const apkPath = path.join(process.cwd(), 'public', 'downloads', 'abah-chat-1.0.0.apk');
-
-  const debExists = fs.existsSync(debPath);
-  const apkExists = fs.existsSync(apkPath);
-
-  res.json({
-    deb: {
-      available: debExists,
-      filename: 'abah-chat_1.0.0_all.deb',
-      version: '1.0.0',
-      size: debExists ? `${Math.round(fs.statSync(debPath).size / 1024)} KB` : null,
-      downloadUrl: '/api/downloads/deb',
-      installCommand: 'sudo dpkg -i abah-chat_1.0.0_all.deb',
-    },
-    apk: {
-      available: apkExists,
-      filename: 'abah-chat-1.0.0.apk',
-      version: '1.0.0',
-      size: apkExists ? `${Math.round(fs.statSync(apkPath).size / 1024)} KB` : null,
-      downloadUrl: '/api/downloads/apk',
-      installCommand: 'adb install -r abah-chat-1.0.0.apk',
-    },
-  });
-});
-
 // 8. Legacy Models Catalog Endpoint (combines pulled + official for compatibility)
 app.get('/api/ollama/models', async (req, res) => {
   const ollamaCheck = await fetchOllamaTags(currentOllamaBaseUrl);
