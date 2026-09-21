@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot, Database, Trash2, RefreshCw, Cpu, Globe, HardDrive, Smartphone } from 'lucide-react';
+import { Bot, Database, Trash2, RefreshCw, Cpu, Globe, HardDrive } from 'lucide-react';
 import { OllamaStatus } from '../types';
 
 interface HeaderProps {
@@ -9,7 +9,6 @@ interface HeaderProps {
   ollamaStatus: OllamaStatus | null;
   onOpenModelPicker: (initialTab?: 'online' | 'pulled') => void;
   onOpenSettings: () => void;
-  onOpenPythonApps: () => void;
   onClearMemory: () => void;
   onToggleMemoryView: () => void;
   isMemoryOpen: boolean;
@@ -23,7 +22,6 @@ export const Header: React.FC<HeaderProps> = ({
   ollamaStatus,
   onOpenModelPicker,
   onOpenSettings,
-  onOpenPythonApps,
   onClearMemory,
   onToggleMemoryView,
   isMemoryOpen,
@@ -125,20 +123,6 @@ export const Header: React.FC<HeaderProps> = ({
             <span>Memory</span>
             <span className="bg-zinc-900/80 text-zinc-300 px-1.5 py-0.2 rounded text-[10px] font-mono">
               {messageCount}
-            </span>
-          </button>
-
-          {/* Ubuntu & Android Apps (.deb / .apk) Button */}
-          <button
-            id="open-python-apps-btn"
-            onClick={onOpenPythonApps}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-xl border border-emerald-500/40 bg-gradient-to-r from-emerald-950/60 to-indigo-950/60 hover:from-emerald-900/60 hover:to-indigo-900/60 text-emerald-200 transition-all shadow-sm ring-1 ring-emerald-500/20"
-            title="Download Ubuntu .deb package and Android .apk package"
-          >
-            <Smartphone className="w-3.5 h-3.5 text-emerald-400" />
-            <span className="font-semibold text-zinc-100">Install Packages</span>
-            <span className="text-[10px] font-mono font-bold px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-              .deb / .apk
             </span>
           </button>
 

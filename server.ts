@@ -953,7 +953,7 @@ app.post('/api/ollama/autostart', async (req, res) => {
   });
 });
 
-// Auto-install Ollama on Linux/Ubuntu if not installed
+// Auto-install Ollama daemon if not installed
 app.post('/api/ollama/autoinstall', (req, res) => {
   exec('curl -fsSL https://ollama.com/install.sh | sh', async (err, stdout, stderr) => {
     if (err) {
@@ -1181,50 +1181,6 @@ app.post('/api/chat', async (req, res) => {
   } catch (err: any) {
     console.error('Error in /api/chat:', err);
     res.status(500).json({ error: err.message || 'Internal Server Error' });
-  }
-});
-
-// Endpoint to list and view Python application files
-app.get('/api/python/files', (req, res) => {
-  try {
-    const fileList = [
-      { name: 'README.md', path: 'README.md', category: 'Documentation' },
-      { name: 'main.py', path: 'python_app/main.py', category: 'Core App' },
-      { name: 'ollama_client.py', path: 'python_app/ollama_client.py', category: 'Ollama Client' },
-      { name: 'memory.py', path: 'python_app/memory.py', category: 'Memory Engine' },
-      { name: 'android_kivy.py', path: 'python_app/android_kivy.py', category: 'Android GUI' },
-      { name: 'buildozer.spec', path: 'buildozer.spec', category: 'Android APK Config' },
-      { name: 'install_ubuntu.sh', path: 'install_ubuntu.sh', category: 'Ubuntu App' },
-      { name: 'android_run.sh', path: 'android_run.sh', category: 'Android Runner' },
-      { name: 'build_apk.sh', path: 'build_apk.sh', category: 'Android Build' },
-      { name: 'abah-chat.desktop', path: 'abah-chat.desktop', category: 'Ubuntu Launcher' },
-    ];
-
-    const result = fileList.map((f) => {
-      const fullPath = path.join(process.cwd(), f.path);
-      const content = fs.existsSync(fullPath) ? fs.readFileSync(fullPath, 'utf-8') : '';
-      return {
-        name: f.name,
-        path: f.path,
-        category: f.category,
-        content,
-        size: content.length,
-      };
-    });
-
-    res.json({ files: result });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Endpoint to trigger/download latest Python bundle
-app.get('/api/python/download', (req, res) => {
-  const zipPath = path.join(process.cwd(), 'public', 'abah_chat_python.zip');
-  if (fs.existsSync(zipPath)) {
-    res.download(zipPath, 'abah_chat_python.zip');
-  } else {
-    res.status(404).json({ error: 'Zip bundle not found. Please regenerate.' });
   }
 });
 

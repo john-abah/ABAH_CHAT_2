@@ -1,6 +1,6 @@
 {
   "name": "ABAH CHAT",
-  "description": "Persistent memory local companion & Ollama model hub with live model pulling, Ubuntu desktop app, and Android support",
+  "description": "Persistent memory companion and Ollama model hub with online model browsing, size selection, real-time downloading, and context retention",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

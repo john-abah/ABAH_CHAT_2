@@ -5,7 +5,6 @@ import { ChatInput } from './components/ChatInput';
 import { MemoryInspector } from './components/MemoryInspector';
 import { OllamaModelPicker } from './components/OllamaModelPicker';
 import { OllamaSettingsModal } from './components/OllamaSettingsModal';
-import { PythonAppsModal } from './components/PythonAppsModal';
 import { MemoryState, OllamaStatus, PulledOllamaModel } from './types';
 import { AlertCircle, CheckCircle2 } from 'lucide-react';
 
@@ -20,7 +19,6 @@ export default function App() {
   const [isModelPickerOpen, setIsModelPickerOpen] = useState<boolean>(false);
   const [modelPickerTab, setModelPickerTab] = useState<'online' | 'pulled'>('online');
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
-  const [isPythonAppsOpen, setIsPythonAppsOpen] = useState<boolean>(false);
   const [errorNotice, setErrorNotice] = useState<string | null>(null);
   const [successNotice, setSuccessNotice] = useState<string | null>(null);
 
@@ -197,7 +195,6 @@ export default function App() {
         ollamaStatus={ollamaStatus}
         onOpenModelPicker={handleOpenModelPicker}
         onOpenSettings={() => setIsSettingsOpen(true)}
-        onOpenPythonApps={() => setIsPythonAppsOpen(true)}
         onClearMemory={handleClearMemory}
         onToggleMemoryView={() => setIsMemoryOpen((v) => !v)}
         isMemoryOpen={isMemoryOpen}
@@ -277,12 +274,6 @@ export default function App() {
         memory={memory}
         isOpen={isMemoryOpen}
         onClose={() => setIsMemoryOpen(false)}
-      />
-
-      {/* Ubuntu & Android Python Apps Modal */}
-      <PythonAppsModal
-        isOpen={isPythonAppsOpen}
-        onClose={() => setIsPythonAppsOpen(false)}
       />
     </div>
   );
