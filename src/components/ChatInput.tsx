@@ -50,6 +50,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
 
   const processFile = async (file: File): Promise<ChatAttachment> => {
     const isImage = file.type.startsWith('image/');
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
 
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -59,19 +60,19 @@ export const ChatInput: React.FC<ChatInputProps> = ({
         if (typeof result === 'string') {
           resolve({
             name: file.name,
-            type: file.type || 'text/plain',
+            type: file.type || (isPdf ? 'application/pdf' : isImage ? 'image/jpeg' : 'text/plain'),
             size: file.size,
             content: result,
             isImage,
           });
         } else {
-          reject(new Error('Failed to read file as text or data'));
+          reject(new Error('Failed to read file'));
         }
       };
 
       reader.onerror = () => reject(new Error('File reading error'));
 
-      if (isImage) {
+      if (isImage || isPdf) {
         reader.readAsDataURL(file);
       } else {
         reader.readAsText(file);
@@ -146,6 +147,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   const getFileIcon = (att: ChatAttachment) => {
     if (att.isImage) return <ImageIcon className="w-3.5 h-3.5 text-pink-400" />;
     const name = att.name.toLowerCase();
+    if (name.endsWith('.pdf') || att.type === 'application/pdf') {
+      return (
+        <span className="flex items-center gap-1 font-bold text-[10px] text-red-400 bg-red-950/60 px-1 py-0.5 rounded border border-red-800/60">
+          PDF
+        </span>
+      );
+    }
     if (
       name.endsWith('.js') ||
       name.endsWith('.ts') ||
@@ -267,7 +275,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                   if (e.target) e.target.value = '';
                 }}
                 className="hidden"
-                accept=".txt,.md,.py,.js,.ts,.tsx,.jsx,.json,.csv,.html,.css,.yaml,.yml,.sh,.log,.xml,.sql,image/*"
+                accept=".pdf,.txt,.md,.py,.js,.ts,.tsx,.jsx,.json,.csv,.html,.css,.yaml,.yml,.sh,.log,.xml,.sql,image/*"
               />
 
               {/* Attach File Button */}

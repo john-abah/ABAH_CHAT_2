@@ -1,6 +1,7 @@
 import React from 'react';
 import { Bot, Database, Trash2, RefreshCw, Cpu, Globe, HardDrive, UploadCloud } from 'lucide-react';
 import { OllamaStatus } from '../types';
+import headerLogo from '../assets/images/abah_chat_heading_1790000297095.jpg';
 
 interface HeaderProps {
   messageCount: number;
@@ -32,14 +33,21 @@ export const Header: React.FC<HeaderProps> = ({
   return (
     <header className="border-b border-zinc-800 bg-zinc-900/90 backdrop-blur-md px-4 py-3 sticky top-0 z-20">
       <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-3">
-        {/* Brand & Info */}
+        {/* Brand & Heading Image */}
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/20 ring-1 ring-white/10 overflow-hidden shrink-0">
-            <Bot className="w-5 h-5 text-white" />
+          <div className="w-10 h-10 rounded-xl overflow-hidden shadow-lg shadow-indigo-500/25 ring-1 ring-cyan-500/40 shrink-0 relative group bg-zinc-950">
+            <img
+              src={headerLogo}
+              alt="ABAH CHAT"
+              className="w-full h-full object-cover object-center group-hover:scale-110 transition-transform duration-300"
+              referrerPolicy="no-referrer"
+            />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-base font-semibold text-zinc-100 tracking-tight">ABAH CHAT</h1>
+              <h1 className="text-base font-bold text-zinc-100 tracking-tight flex items-center gap-1.5">
+                ABAH CHAT
+              </h1>
               <span className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                 Persistent Memory

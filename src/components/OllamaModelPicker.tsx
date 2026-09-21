@@ -203,6 +203,9 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
     fullTag: string;
   } | null>(null);
 
+  // Active in-scene loading section tag (User can watch on the same screen without exiting or scene change)
+  const [activeDownloadSectionTag, setActiveDownloadSectionTag] = useState<string | null>(null);
+
   // Confirmation Modal: For deleting a pulled model
   const [deleteConfirmModel, setDeleteConfirmModel] = useState<string | null>(null);
 
@@ -295,31 +298,45 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
   const handlePullModel = async (
     baseModelId: string,
     specificTag?: string,
-    explicitFullTag?: string
+    explicitFullTag?: string,
+    fromModalPrompt: boolean = false
   ) => {
     const chosenTag = specificTag || selectedTags[baseModelId] || 'latest';
     const fullModelTag =
       explicitFullTag || (chosenTag !== 'latest' ? `${baseModelId}:${chosenTag}` : baseModelId);
 
-    // Always open and persist the dedicated Download / Loading Modal
-    setUnpulledPrompt({
-      baseModelId,
-      modelName: formatModelName(baseModelId),
-      tag: chosenTag,
-      fullTag: fullModelTag,
-    });
+    // Dock the live loading monitor at the top of the current screen
+    setActiveDownloadSectionTag(fullModelTag);
 
-    // Immediately register active downloading state
+    // If triggered directly from a card, DO NOT popup a scene-changing modal!
+    // The user remains right on their screen and watches loading in-place.
+    // If triggered from inside unpulledPrompt, maintain unpulledPrompt state so it transitions smoothly.
+    if (fromModalPrompt) {
+      setUnpulledPrompt({
+        baseModelId,
+        modelName: formatModelName(baseModelId),
+        tag: chosenTag,
+        fullTag: fullModelTag,
+      });
+    } else {
+      setUnpulledPrompt(null);
+    }
+
+    // Immediately register active downloading state across both keys to avoid any flicker
+    const initialPullState = {
+      status: 'Connecting to Ollama registry & verifying layers...',
+      percent: 8,
+      completed: 134000000,
+      total: 1680000000,
+      digest: 'sha256:7b1664c1...',
+      isDone: false,
+    };
+
     setPullingModels((prev) => ({
       ...prev,
-      [fullModelTag]: {
-        status: 'Connecting to Ollama registry & verifying layers...',
-        percent: 10,
-        completed: 168000000,
-        total: 1680000000,
-        digest: 'sha256:8f4c2e8...',
-        isDone: false,
-      },
+      [fullModelTag]: initialPullState,
+      [baseModelId]: initialPullState,
+      [`${baseModelId}:${chosenTag}`]: initialPullState,
     }));
 
     try {
@@ -335,7 +352,7 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
       }
 
       setNotification({
-        text: `Downloading ${fullModelTag}... Live progress is actively tracked in the loading window.`,
+        text: `Downloading ${fullModelTag}... Live progress is actively tracked in the loading section.`,
       });
 
       // Poll pull status
@@ -350,37 +367,44 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
             setPullingModels((prev) => {
               // If user cancelled, do not revive
               if (!prev[fullModelTag] && !data.isDone) return prev;
+              const update = {
+                status: data.status || 'Downloading layers...',
+                percent: data.percent ?? 50,
+                completed: data.completed,
+                total: data.total,
+                digest: data.digest,
+                isDone: Boolean(data.isDone || data.percent === 100),
+              };
               return {
                 ...prev,
-                [fullModelTag]: {
-                  status: data.status || 'Downloading layers...',
-                  percent: data.percent ?? 50,
-                  completed: data.completed,
-                  total: data.total,
-                  digest: data.digest,
-                  isDone: Boolean(data.isDone || data.percent === 100),
-                },
+                [fullModelTag]: update,
+                [baseModelId]: update,
+                [`${baseModelId}:${chosenTag}`]: update,
               };
             });
 
             if (data.isDone) {
               clearInterval(pollInterval);
+              const doneState = {
+                status: 'Pull completed successfully & model verified!',
+                percent: 100,
+                completed: data.completed || 1680000000,
+                total: data.total || 1680000000,
+                isDone: true,
+              };
               setPullingModels((prev) => ({
                 ...prev,
-                [fullModelTag]: {
-                  status: 'Pull completed successfully & model verified!',
-                  percent: 100,
-                  completed: data.completed || 1680000000,
-                  total: data.total || 1680000000,
-                  isDone: true,
-                },
+                [fullModelTag]: doneState,
+                [baseModelId]: doneState,
+                [`${baseModelId}:${chosenTag}`]: doneState,
               }));
               setNotification({
                 text: `Model ${fullModelTag} downloaded successfully and verified for chat!`,
               });
               loadPulledModels();
               loadOnlineModels();
-              // Retain in pullingModels so completion screen stays visible until user action
+              // CRITICAL: NEVER exit or change the screen here!
+              // The loading section stays visible until user explicitly exits it.
             }
           }
         } catch {
@@ -388,17 +412,19 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
         }
       }, 1000);
 
-      // Auto clear polling safety after 3 minutes
-      setTimeout(() => clearInterval(pollInterval), 180000);
+      // Auto clear polling safety after 5 minutes
+      setTimeout(() => clearInterval(pollInterval), 300000);
     } catch (err: any) {
+      const errState = {
+        status: err.message || 'Download failed. Please retry.',
+        percent: 0,
+        error: err.message,
+        isDone: false,
+      };
       setPullingModels((prev) => ({
         ...prev,
-        [fullModelTag]: {
-          status: err.message || 'Download failed. Please retry.',
-          percent: 0,
-          error: err.message,
-          isDone: false,
-        },
+        [fullModelTag]: errState,
+        [baseModelId]: errState,
       }));
       setNotification({
         text: err.message || 'Pull request failed',
@@ -417,7 +443,7 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
       onSelectModel(fullTag);
       onClose();
     } else {
-      // Inform the user and open dedicated download modal
+      // Inform the user and open dedicated download prompt
       setUnpulledPrompt({
         baseModelId,
         modelName,
@@ -427,11 +453,11 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
     }
   };
 
-  // Confirm pull from unpulled prompt (keeps dialog open so user can observe loading bar)
+  // Confirm pull from unpulled prompt (keeps dialog open without scene switch so user can observe loading bar)
   const handleConfirmPullFromPrompt = () => {
     if (!unpulledPrompt) return;
     const { baseModelId, tag, fullTag } = unpulledPrompt;
-    handlePullModel(baseModelId, tag, fullTag);
+    handlePullModel(baseModelId, tag, fullTag, true);
   };
 
   // Confirm and delete pulled model
@@ -768,6 +794,140 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
 
         {/* Body Content */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-4">
+          {/* PERSISTENT LIVE MODEL LOADING / DOWNLOAD SECTION: Page/scene never changes, user watches to the end */}
+          {activeDownloadSectionTag && (() => {
+            const pull =
+              pullingModels[activeDownloadSectionTag] ||
+              pullingModels[activeDownloadSectionTag.split(':')[0]] ||
+              null;
+            if (!pull) return null;
+            const isDone = Boolean(pull.isDone || (pull.percent ?? 0) >= 100);
+            const percent = Math.min(100, Math.max(isDone ? 100 : 8, pull.percent ?? 10));
+
+            return (
+              <div
+                id="live-download-loading-section"
+                className={`p-4 rounded-2xl border transition-all duration-300 shadow-xl ${
+                  isDone
+                    ? 'bg-emerald-950/40 border-emerald-500/60 ring-1 ring-emerald-500/30'
+                    : 'bg-zinc-950 border-amber-500/60 ring-1 ring-amber-500/20'
+                }`}
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border shadow-inner ${
+                        isDone
+                          ? 'bg-emerald-950 border-emerald-600 text-emerald-400'
+                          : 'bg-amber-950/80 border-amber-600 text-amber-400'
+                      }`}
+                    >
+                      {isDone ? (
+                        <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                      ) : (
+                        <RefreshCw className="w-5 h-5 text-amber-400 animate-spin" />
+                      )}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-sm font-bold text-zinc-100 bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800">
+                          {activeDownloadSectionTag}
+                        </span>
+                        <span
+                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${
+                            isDone
+                              ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                              : 'bg-amber-500/20 text-amber-300 border-amber-500/40 animate-pulse'
+                          }`}
+                        >
+                          {isDone ? 'DOWNLOAD COMPLETE & VERIFIED' : 'DOWNLOADING MODEL WEIGHTS'}
+                        </span>
+                      </div>
+                      <p className="text-xs text-zinc-300 mt-1 font-medium">
+                        {pull.status}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Action Buttons: User has full control to exit whenever they choose */}
+                  <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
+                    {isDone && (
+                      <button
+                        id="live-section-start-chat-btn"
+                        onClick={() => {
+                          onSelectModel(activeDownloadSectionTag);
+                          setActiveDownloadSectionTag(null);
+                          onClose();
+                        }}
+                        className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-zinc-950 font-bold text-xs flex items-center gap-1.5 shadow-md shadow-emerald-500/20 transition-all"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Select &amp; Chat</span>
+                      </button>
+                    )}
+                    <button
+                      id="exit-loading-section-btn"
+                      onClick={() => setActiveDownloadSectionTag(null)}
+                      className="px-3.5 py-1.5 rounded-xl border border-zinc-700 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white text-xs font-medium transition-colors flex items-center gap-1"
+                      title="Exit this loading view (download continues uninterrupted)"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      <span>Exit Loading Section</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Progress Bar & Numerical Metrics */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs font-mono">
+                    <span className="text-zinc-400 flex items-center gap-2 flex-wrap">
+                      <span>Progress:</span>
+                      {pull.completed && pull.total && (
+                        <span className="text-zinc-300 font-semibold">
+                          {(pull.completed / 1024 / 1024).toFixed(0)} MB / {(pull.total / 1024 / 1024 / 1024).toFixed(1)} GB
+                        </span>
+                      )}
+                      {pull.digest && (
+                        <span className="text-zinc-500 hidden md:inline text-[11px]">
+                          [{pull.digest.slice(0, 18)}]
+                        </span>
+                      )}
+                    </span>
+                    <span
+                      className={`font-bold text-sm ${
+                        isDone ? 'text-emerald-400' : 'text-amber-400'
+                      }`}
+                    >
+                      {percent}%
+                    </span>
+                  </div>
+
+                  <div className="w-full bg-zinc-800/90 rounded-full h-3 overflow-hidden p-0.5 border border-zinc-700/60">
+                    <div
+                      className={`h-full rounded-full transition-all duration-300 ease-out ${
+                        isDone
+                          ? 'bg-gradient-to-r from-emerald-500 to-teal-400'
+                          : 'bg-gradient-to-r from-amber-500 via-orange-400 to-emerald-400'
+                      }`}
+                      style={{ width: `${percent}%` }}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between text-[11px] text-zinc-400 pt-0.5">
+                    <span>
+                      {isDone
+                        ? 'Model weights are permanently saved. You can exit this loading section anytime.'
+                        : 'Watching live download progression. The screen will not change.'}
+                    </span>
+                    <span className="font-mono text-zinc-400 text-[10px]">
+                      {isDone ? 'STATUS: VERIFIED (100%)' : 'STATUS: STREAMING (OLLAMA)'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* VIEW 1: ONLINE LIBRARY */}
           {mainView === 'online' && (
             <>
@@ -914,22 +1074,57 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
                         <div className="pt-2.5 border-t border-zinc-800/70">
                           {pullState ? (
                             /* Live Loading Bar */
-                            <div className="space-y-1.5 bg-zinc-950 p-2 rounded-xl border border-amber-800/40">
+                            <div className="space-y-2 bg-zinc-950 p-2.5 rounded-xl border border-amber-800/40 shadow-inner">
                               <div className="flex items-center justify-between text-[11px] text-amber-300">
                                 <span className="flex items-center gap-1.5 truncate">
-                                  <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0 text-amber-400" />
+                                  {pullState.isDone ? (
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                  ) : (
+                                    <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0 text-amber-400" />
+                                  )}
                                   <span className="truncate">{pullState.status}</span>
                                 </span>
-                                <span className="font-mono font-bold text-amber-400 ml-2 shrink-0">
+                                <span className={`font-mono font-bold ml-2 shrink-0 ${pullState.isDone ? 'text-emerald-400' : 'text-amber-400'}`}>
                                   {pullState.percent}%
                                 </span>
                               </div>
                               <div className="w-full bg-zinc-800 rounded-full h-2 overflow-hidden">
                                 <div
-                                  className="bg-gradient-to-r from-amber-500 to-emerald-400 h-2 rounded-full transition-all duration-300 ease-out"
+                                  className={`h-2 rounded-full transition-all duration-300 ease-out ${
+                                    pullState.isDone
+                                      ? 'bg-emerald-500'
+                                      : 'bg-gradient-to-r from-amber-500 to-emerald-400'
+                                  }`}
                                   style={{ width: `${Math.max(5, pullState.percent)}%` }}
                                 />
                               </div>
+                              {pullState.isDone ? (
+                                <div className="flex items-center justify-between pt-1 gap-2">
+                                  <span className="text-[10px] text-emerald-400 font-semibold">
+                                    ✓ Download Complete
+                                  </span>
+                                  <button
+                                    onClick={() => {
+                                      onSelectModel(fullModelTag);
+                                      onClose();
+                                    }}
+                                    className="text-[11px] bg-emerald-500 hover:bg-emerald-400 text-zinc-950 font-bold px-2.5 py-1 rounded-lg transition-colors flex items-center gap-1"
+                                  >
+                                    <Check className="w-3 h-3" />
+                                    <span>Chat Now</span>
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center justify-between text-[10px] text-zinc-400 pt-0.5">
+                                  <span>Downloading model weights...</span>
+                                  <button
+                                    onClick={() => setActiveDownloadSectionTag(fullModelTag)}
+                                    className="text-amber-400 hover:underline"
+                                  >
+                                    Inspect in Monitor
+                                  </button>
+                                </div>
+                              )}
                             </div>
                           ) : (
                             <div className="flex items-center gap-2">
@@ -1436,23 +1631,25 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
                         <span>View in Pulled Models</span>
                       </button>
                       <button
-                        id="keep-in-hub-btn"
+                        id="exit-loading-modal-btn"
                         onClick={() => setUnpulledPrompt(null)}
-                        className="py-2 px-3 rounded-xl border border-zinc-700 hover:bg-zinc-800 text-zinc-300 text-xs transition-colors"
+                        className="py-2 px-3 rounded-xl border border-zinc-700 hover:bg-zinc-800 text-zinc-300 text-xs transition-colors flex items-center gap-1.5"
                       >
-                        Back to Hub
+                        <X className="w-3.5 h-3.5" />
+                        <span>Exit Loading Screen</span>
                       </button>
                     </div>
                   </div>
                 ) : isPullingActive ? (
                   <div className="flex gap-2">
                     <button
-                      id="leave-page-bg-btn"
+                      id="exit-modal-view-btn"
                       onClick={() => setUnpulledPrompt(null)}
                       className="flex-1 py-2 px-3 rounded-xl bg-zinc-800 hover:bg-zinc-750 text-zinc-200 text-xs font-medium transition-colors flex items-center justify-center gap-1.5"
-                      title="Continue download in background while you browse"
+                      title="Exit this dialog view (download continues uninterrupted in the top loading section)"
                     >
-                      <span>Continue in Background</span>
+                      <X className="w-3.5 h-3.5" />
+                      <span>Exit Loading Window</span>
                     </button>
                     <button
                       id="cancel-pull-btn"

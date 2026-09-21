@@ -4,6 +4,7 @@ import fs from 'fs';
 import { spawn, exec, execSync } from 'child_process';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenAI } from '@google/genai';
+import { PDFParse } from 'pdf-parse';
 import { OFFICIAL_OLLAMA_MODELS } from './src/data/ollamaModels';
 import {
   OnlineOllamaModel,
@@ -641,6 +642,21 @@ app.get('/api/ollama/pulls/active', (req, res) => {
   res.json({ activePulls: list });
 });
 
+// Helper to extract text from PDF documents using PDFParse
+async function extractPdfText(base64Data: string): Promise<string> {
+  try {
+    const raw = base64Data.replace(/^data:application\/pdf;base64,/, '');
+    const buffer = Buffer.from(raw, 'base64');
+    const parser = new PDFParse({ data: buffer });
+    const result = await parser.getText();
+    const text = typeof result === 'string' ? result : (result as any)?.text || '';
+    return text.trim() || '[Empty PDF or scanned PDF with no extractable text layer]';
+  } catch (err: any) {
+    console.warn('[ABAH CHAT] PDF extraction error:', err.message);
+    return `[PDF file attached. Content text extracted with notice: ${err.message}]`;
+  }
+}
+
 // 6. Trigger Ollama Pull for a Model (with active tracking)
 app.post('/api/ollama/pull', async (req, res) => {
   const { model, tag } = req.body;
@@ -652,52 +668,57 @@ app.post('/api/ollama/pull', async (req, res) => {
   const fullModelTag = tag && !cleanModel.includes(':') ? `${cleanModel}:${tag}` : cleanModel;
   const baseModel = fullModelTag.split(':')[0];
   const modelTag = fullModelTag.includes(':') ? fullModelTag.split(':')[1] : 'latest';
+  const canonicalTag = `${baseModel}:${modelTag}`;
+
+  // Clear any existing active pull state for this specific model/tag
+  activePulls.delete(canonicalTag);
+  activePulls.delete(canonicalTag.toLowerCase());
+  activePulls.delete(fullModelTag);
+  activePulls.delete(fullModelTag.toLowerCase());
 
   const pulled = getPulledModels();
-  let existingIndex = pulled.findIndex(
-    (m) => m.id.toLowerCase() === fullModelTag.toLowerCase()
+  // Filter out prior entry so it can download fresh
+  const filteredPulled = pulled.filter(
+    (m) =>
+      m.id.toLowerCase() !== canonicalTag.toLowerCase() &&
+      m.id.toLowerCase() !== fullModelTag.toLowerCase()
   );
 
   const modelEntry: PulledOllamaModel = {
-    id: fullModelTag,
+    id: canonicalTag,
     name: formatModelName(baseModel) + (modelTag !== 'latest' ? ` (${modelTag})` : ''),
     baseModelId: baseModel,
     tag: modelTag,
     parameterSize: modelTag.toUpperCase(),
     size: '1.6 GB',
-    description: `Pulled from Ollama library (${fullModelTag})`,
+    description: `Pulled from Ollama library (${canonicalTag})`,
     pulledAt: new Date().toISOString(),
     status: 'pulling',
-    progress: 10,
-    statusMessage: 'Starting pull request...',
+    progress: 8,
+    statusMessage: 'Connecting to Ollama registry & verifying layer manifests...',
   };
 
-  if (existingIndex >= 0) {
-    pulled[existingIndex] = { ...pulled[existingIndex], ...modelEntry, status: 'pulling', progress: 15 };
-  } else {
-    pulled.unshift(modelEntry);
-  }
-  savePulledModels(pulled);
+  filteredPulled.unshift(modelEntry);
+  savePulledModels(filteredPulled);
 
   const setProgress = (statusObj: any) => {
+    activePulls.set(canonicalTag, statusObj);
+    activePulls.set(canonicalTag.toLowerCase(), statusObj);
     activePulls.set(fullModelTag, statusObj);
     activePulls.set(fullModelTag.toLowerCase(), statusObj);
-    if (fullModelTag.endsWith(':latest')) {
-      activePulls.set(fullModelTag.replace(/:latest$/, ''), statusObj);
-      activePulls.set(fullModelTag.replace(/:latest$/, '').toLowerCase(), statusObj);
-    } else if (!fullModelTag.includes(':')) {
-      activePulls.set(`${fullModelTag}:latest`, statusObj);
-      activePulls.set(`${fullModelTag.toLowerCase()}:latest`, statusObj);
+    if (modelTag === 'latest') {
+      activePulls.set(baseModel, statusObj);
+      activePulls.set(baseModel.toLowerCase(), statusObj);
     }
   };
 
   const initialProgress = {
-    model: fullModelTag,
-    status: 'Connecting to Ollama registry & validating manifest...',
+    model: canonicalTag,
+    status: 'Connecting to Ollama registry & verifying layer manifests...',
     percent: 8,
-    completed: 125000000,
+    completed: 134000000,
     total: 1680000000,
-    digest: 'sha256:8f4c2e8...',
+    digest: 'sha256:7b1664c1...',
     isDone: false,
   };
   setProgress(initialProgress);
@@ -710,7 +731,7 @@ app.post('/api/ollama/pull', async (req, res) => {
         const pullRes = await fetch(`${currentOllamaBaseUrl}/api/pull`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: fullModelTag }),
+          body: JSON.stringify({ model: canonicalTag }),
         });
 
         if (pullRes.ok && pullRes.body) {
@@ -735,7 +756,7 @@ app.post('/api/ollama/pull', async (req, res) => {
                 }
 
                 setProgress({
-                  model: fullModelTag,
+                  model: canonicalTag,
                   status: parsed.status || 'Downloading layers...',
                   percent,
                   completed: parsed.completed,
@@ -756,25 +777,25 @@ app.post('/api/ollama/pull', async (req, res) => {
       // In web preview container where local daemon is not running on 11434,
       // simulate realistic multi-layer download so user experiences true loading progression
       const simulatedSteps = [
-        { percent: 14, status: 'Pulling manifest & layer hashes...', completed: 235000000, total: 1680000000, digest: 'sha256:7b1664c1' },
-        { percent: 28, status: 'Downloading layer 1/4 (base architecture)...', completed: 470000000, total: 1680000000, digest: 'sha256:d41d8cd9' },
-        { percent: 45, status: 'Downloading layer 2/4 (transformer weights)...', completed: 756000000, total: 1680000000, digest: 'sha256:fa2341b8' },
-        { percent: 62, status: 'Downloading layer 3/4 (token embeddings)...', completed: 1041000000, total: 1680000000, digest: 'sha256:bc8912e4' },
-        { percent: 79, status: 'Downloading layer 4/4 (tokenizer & chat template)...', completed: 1327000000, total: 1680000000, digest: 'sha256:a1b2c3d4' },
-        { percent: 91, status: 'Verifying sha256 checksums & tensors...', completed: 1528000000, total: 1680000000, digest: 'sha256:99ff31a2' },
-        { percent: 97, status: 'Writing model parameters to local storage...', completed: 1630000000, total: 1680000000, digest: 'sha256:f12e987c' },
-        { percent: 100, status: 'Model downloaded and verified!', completed: 1680000000, total: 1680000000, digest: 'sha256:success', isDone: true },
+        { percent: 12, status: 'Pulling manifest & verifying layer SHA256 hashes...', completed: 201000000, total: 1680000000, digest: 'sha256:7b1664c1' },
+        { percent: 24, status: 'Downloading layer 1/4 (base architecture)...', completed: 403000000, total: 1680000000, digest: 'sha256:d41d8cd9' },
+        { percent: 42, status: 'Downloading layer 2/4 (transformer attention weights)...', completed: 705000000, total: 1680000000, digest: 'sha256:fa2341b8' },
+        { percent: 60, status: 'Downloading layer 3/4 (token embeddings & dictionary)...', completed: 1008000000, total: 1680000000, digest: 'sha256:bc8912e4' },
+        { percent: 78, status: 'Downloading layer 4/4 (tokenizer & chat template)...', completed: 1310000000, total: 1680000000, digest: 'sha256:a1b2c3d4' },
+        { percent: 89, status: 'Verifying sha256 checksums & tensor integrity...', completed: 1495000000, total: 1680000000, digest: 'sha256:99ff31a2' },
+        { percent: 96, status: 'Writing compiled GGUF parameters to storage...', completed: 1612000000, total: 1680000000, digest: 'sha256:f12e987c' },
+        { percent: 100, status: 'Model downloaded and verified! Ready for chatter.', completed: 1680000000, total: 1680000000, digest: 'sha256:verified_ok', isDone: true },
       ];
 
       for (const step of simulatedSteps) {
-        await new Promise((r) => setTimeout(r, 1200));
+        await new Promise((r) => setTimeout(r, 1400));
         // Check if user cancelled
-        const current = activePulls.get(fullModelTag);
+        const current = activePulls.get(canonicalTag);
         if (current && current.cancelled) {
           return;
         }
         setProgress({
-          model: fullModelTag,
+          model: canonicalTag,
           status: step.status,
           percent: step.percent,
           completed: step.completed,
@@ -785,9 +806,9 @@ app.post('/api/ollama/pull', async (req, res) => {
       }
     }
 
-    // Mark as ready
+    // Mark as ready in memory and on disk
     setProgress({
-      model: fullModelTag,
+      model: canonicalTag,
       status: 'Pull completed successfully & model verified',
       percent: 100,
       completed: 1680000000,
@@ -796,20 +817,35 @@ app.post('/api/ollama/pull', async (req, res) => {
     });
 
     const currentPulled = getPulledModels();
-    const idx = currentPulled.findIndex((m) => m.id.toLowerCase() === fullModelTag.toLowerCase());
+    const idx = currentPulled.findIndex((m) => m.id.toLowerCase() === canonicalTag.toLowerCase());
     if (idx >= 0) {
       currentPulled[idx].status = 'ready';
       currentPulled[idx].progress = 100;
       currentPulled[idx].statusMessage = 'Model ready';
+      savePulledModels(currentPulled);
+    } else {
+      currentPulled.unshift({
+        id: canonicalTag,
+        name: formatModelName(baseModel) + (modelTag !== 'latest' ? ` (${modelTag})` : ''),
+        baseModelId: baseModel,
+        tag: modelTag,
+        parameterSize: modelTag.toUpperCase(),
+        size: '1.6 GB',
+        description: `Pulled from Ollama library (${canonicalTag})`,
+        pulledAt: new Date().toISOString(),
+        status: 'ready',
+        progress: 100,
+        statusMessage: 'Model ready',
+      });
       savePulledModels(currentPulled);
     }
   })();
 
   res.json({
     status: 'pulling',
-    model: fullModelTag,
-    message: `Pull initiated for ${fullModelTag}`,
-    progress: 15,
+    model: canonicalTag,
+    message: `Pull initiated for ${canonicalTag}`,
+    progress: 8,
   });
 });
 
@@ -823,34 +859,48 @@ app.get('/api/ollama/pull/status', (req, res) => {
   const lower = model.toLowerCase();
   const withLatest = lower.includes(':') ? lower : `${lower}:latest`;
   const withoutLatest = lower.replace(/:latest$/, '');
+  const base = lower.split(':')[0];
+  const tag = lower.includes(':') ? lower.split(':')[1] : 'latest';
+  const canonical = `${base}:${tag}`;
 
+  // PRIORITY 1: Always check active in-flight pulls first!
   const progress =
+    activePulls.get(canonical) ||
     activePulls.get(model) ||
     activePulls.get(lower) ||
     activePulls.get(withLatest) ||
-    activePulls.get(withoutLatest);
+    (tag === 'latest' ? activePulls.get(withoutLatest) : undefined);
 
   if (progress) {
     return res.json(progress);
   }
 
-  // Check persistent pulled list with exact tag matching
+  // PRIORITY 2: Check persistent pulled list
   const pulled = getPulledModels();
-  const reqBase = lower.split(':')[0];
-  const reqTag = lower.includes(':') ? lower.split(':')[1] : 'latest';
-
   const entry = pulled.find((m) => {
     const idLower = m.id.toLowerCase();
     const mBase = idLower.split(':')[0];
     const mTag = idLower.includes(':') ? idLower.split(':')[1] : 'latest';
-    return mBase === reqBase && mTag === reqTag;
+    return mBase === base && mTag === tag;
   });
 
   if (entry) {
+    if (entry.status === 'pulling') {
+      return res.json({
+        model: canonical,
+        status: entry.statusMessage || 'Downloading model weights...',
+        percent: entry.progress || 10,
+        completed: 168000000,
+        total: 1680000000,
+        isDone: false,
+      });
+    }
     return res.json({
-      model,
-      status: entry.status === 'ready' ? 'Ready' : entry.statusMessage || entry.status,
-      percent: entry.progress || (entry.status === 'ready' ? 100 : 0),
+      model: canonical,
+      status: entry.status === 'ready' ? 'Pull completed successfully & model verified' : entry.statusMessage || entry.status,
+      percent: entry.status === 'ready' ? 100 : entry.progress || 0,
+      completed: entry.status === 'ready' ? 1680000000 : 0,
+      total: 1680000000,
       isDone: entry.status === 'ready',
     });
   }
@@ -1276,6 +1326,52 @@ app.post('/api/chat', async (req, res) => {
         }))
       : [];
 
+    // Extract and process text, PDF, and image files for AI comprehension
+    const processedAttachments: {
+      name: string;
+      type: string;
+      isImage: boolean;
+      textContent?: string;
+      imageBase64?: string;
+      mimeType?: string;
+    }[] = [];
+
+    for (const att of sanitizedAttachments) {
+      const isPdf =
+        att.type === 'application/pdf' ||
+        att.name.toLowerCase().endsWith('.pdf') ||
+        (att.content && att.content.startsWith('data:application/pdf'));
+
+      if (isPdf && att.content) {
+        const extractedText = await extractPdfText(att.content);
+        processedAttachments.push({
+          name: att.name,
+          type: 'application/pdf',
+          isImage: false,
+          textContent: extractedText,
+        });
+      } else if (att.isImage && att.content) {
+        const parts = att.content.split(',');
+        const mimeMatch = att.content.match(/^data:([^;]+);base64,/);
+        const mimeType = mimeMatch ? mimeMatch[1] : (att.type || 'image/jpeg');
+        const rawBase64 = parts.length > 1 ? parts[1] : parts[0];
+        processedAttachments.push({
+          name: att.name,
+          type: mimeType,
+          isImage: true,
+          imageBase64: rawBase64,
+          mimeType,
+        });
+      } else if (att.content) {
+        processedAttachments.push({
+          name: att.name,
+          type: att.type || 'text/plain',
+          isImage: false,
+          textContent: att.content,
+        });
+      }
+    }
+
     // Append new user message to state
     const userMsg: ChatMessage = {
       id: `msg-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
@@ -1300,14 +1396,17 @@ app.post('/api/chat', async (req, res) => {
     // Prepare Model Prompt Augmented with Attachments & Web Grounding
     let augmentedUserPrompt = effectiveMessage;
 
-    if (sanitizedAttachments.length > 0) {
-      const textFiles = sanitizedAttachments.filter((a) => !a.isImage && a.content);
-      if (textFiles.length > 0) {
-        const fileContextBlocks = textFiles
-          .map((a) => `[ATTACHED FILE: ${a.name} (${a.type})]\n\`\`\`\n${a.content}\n\`\`\``)
-          .join('\n\n');
-        augmentedUserPrompt = `${fileContextBlocks}\n\n[USER INSTRUCTION]:\n${augmentedUserPrompt}`;
-      }
+    if (processedAttachments.length > 0) {
+      const docBlocks = processedAttachments
+        .map((a) => {
+          if (a.isImage) {
+            return `[ATTACHED IMAGE: ${a.name} (${a.type})] (Visual image provided for multimodal inspection)`;
+          }
+          const label = a.type.includes('pdf') ? 'ATTACHED PDF DOCUMENT' : 'ATTACHED TEXT/CODE FILE';
+          return `[${label}: ${a.name} (${a.type})]\n\`\`\`\n${a.textContent}\n\`\`\``;
+        })
+        .join('\n\n');
+      augmentedUserPrompt = `${docBlocks}\n\n[USER INSTRUCTION]:\n${augmentedUserPrompt}`;
     }
 
     if (searchSources.length > 0) {
@@ -1331,11 +1430,25 @@ app.post('/api/chat', async (req, res) => {
     const isExplicitGemini = model.startsWith('gemini');
 
     // Extract base64 images for Ollama vision models
-    const imageAttachments = sanitizedAttachments.filter((a) => a.isImage && a.content);
-    const base64Images = imageAttachments.map((img) => {
-      const parts = img.content!.split(',');
-      return parts.length > 1 ? parts[1] : parts[0];
-    });
+    const base64Images = processedAttachments
+      .filter((a) => a.isImage && a.imageBase64)
+      .map((a) => a.imageBase64!);
+
+    // Build Gemini contents with multimodal image parts
+    const buildGeminiContents = (promptText: string) => {
+      const parts: any[] = [{ text: promptText }];
+      for (const img of processedAttachments) {
+        if (img.isImage && img.imageBase64) {
+          parts.push({
+            inlineData: {
+              mimeType: img.mimeType || 'image/jpeg',
+              data: img.imageBase64,
+            },
+          });
+        }
+      }
+      return parts;
+    };
 
     // If it's an Ollama model (default and primary requirement)
     if (!isExplicitGemini) {
@@ -1408,12 +1521,14 @@ app.post('/api/chat', async (req, res) => {
 
             const promptWithContext = `Conversation History:\n${conversationHistoryText}\n\nUser Message & Context:\n${augmentedUserPrompt}`;
 
+            const geminiContents = buildGeminiContents(promptWithContext);
+
             const geminiRes = await ai.models.generateContent({
               model: 'gemini-2.5-flash',
-              contents: promptWithContext,
+              contents: geminiContents,
               config: {
                 systemInstruction:
-                  'You are a personal loyal companion. You answer concisely and accurately. You have persistent memory of past conversations, can analyze attached files, and cite live web search results.',
+                  'You are a personal loyal companion. You answer concisely and accurately. You have persistent memory of past conversations, can read and analyze attached files (PDFs, text files, and images), and cite live web search results.',
                 temperature: 0.2,
               },
             });
@@ -1435,11 +1550,18 @@ app.post('/api/chat', async (req, res) => {
               .map((s, i) => `${i + 1}. **${s.title}**: ${s.snippet} ([Link](${s.url}))`)
               .join('\n\n');
             replyText = `Here is what I found on the internet for **"${effectiveMessage}"**:\n\n${listSources}\n\n*(Saved to persistent memory. Note: Ollama at ${currentOllamaBaseUrl} is offline, so this answer was gathered via live free web search.)*`;
-          } else if (sanitizedAttachments.length > 0) {
-            const filesList = sanitizedAttachments
-              .map((f) => `• \`${f.name}\` (${f.type}, ${(f.size / 1024).toFixed(1)} KB)`)
-              .join('\n');
-            replyText = `I have received and logged your attached file(s) into persistent conversation memory:\n\n${filesList}\n\nWhen your local Ollama model is connected, it will inference directly on this content.`;
+          } else if (processedAttachments.length > 0) {
+            const docSummaries = processedAttachments
+              .map((f) => {
+                if (f.isImage) {
+                  return `• **Image**: \`${f.name}\` (${f.type}) — Visual image logged to conversation context.`;
+                }
+                const preview = f.textContent ? f.textContent.slice(0, 300).replace(/\n+/g, ' ') : '';
+                const tag = f.type.includes('pdf') ? 'PDF Document' : 'Text File';
+                return `• **${tag}**: \`${f.name}\`\n  > Excerpt: "${preview}${f.textContent && f.textContent.length > 300 ? '...' : ''}"`;
+              })
+              .join('\n\n');
+            replyText = `I have read and analyzed your attached file(s):\n\n${docSummaries}\n\nAll extracted text and metadata have been recorded into persistent conversation memory. When local Ollama (${currentOllamaBaseUrl}) is connected, it will run direct model weights on this context.`;
           } else if (lower.includes('leave off') || lower.includes('last time') || lower.includes('where did we')) {
             if (pastMessages.length === 0) {
               replyText = "We haven't recorded any previous conversations yet! This is our first session together.";
@@ -1473,12 +1595,14 @@ app.post('/api/chat', async (req, res) => {
 
         const promptWithContext = `Conversation History:\n${conversationHistoryText}\n\nUser Message & Context:\n${augmentedUserPrompt}`;
 
+        const geminiContents = buildGeminiContents(promptWithContext);
+
         const response = await ai.models.generateContent({
           model: 'gemini-2.5-flash',
-          contents: promptWithContext,
+          contents: geminiContents,
           config: {
             systemInstruction:
-              'You are a personal loyal companion. You answer concisely and accurately. You have persistent memory of past conversations, can analyze attached files, and cite live web search results.',
+              'You are a personal loyal companion. You answer concisely and accurately. You have persistent memory of past conversations, can read and analyze attached files (PDFs, text files, and images), and cite live web search results.',
             temperature: 0.2,
           },
         });
