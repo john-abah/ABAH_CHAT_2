@@ -1,5 +1,44 @@
 [
   {
+    "id": "phi4:latest",
+    "name": "Phi4",
+    "baseModelId": "phi4",
+    "tag": "latest",
+    "parameterSize": "LATEST",
+    "size": "1.6 GB",
+    "description": "Pulled from Ollama library (phi4:latest)",
+    "pulledAt": "2026-09-21T14:06:21.173Z",
+    "status": "pulling",
+    "progress": 10,
+    "statusMessage": "Starting pull request..."
+  },
+  {
+    "id": "nomic-embed-text:latest",
+    "name": "Nomic Embed Text",
+    "baseModelId": "nomic-embed-text",
+    "tag": "latest",
+    "parameterSize": "LATEST",
+    "size": "1.6 GB",
+    "description": "Pulled from Ollama library (nomic-embed-text:latest)",
+    "pulledAt": "2026-09-21T14:01:33.928Z",
+    "status": "ready",
+    "progress": 100,
+    "statusMessage": "Model ready"
+  },
+  {
+    "id": "deepseek-r1:1.5b",
+    "name": "DeepSeek-R1 (1.5b)",
+    "baseModelId": "deepseek-r1",
+    "tag": "1.5b",
+    "parameterSize": "1.5B",
+    "size": "1.6 GB",
+    "description": "Pulled from Ollama library (deepseek-r1:1.5b)",
+    "pulledAt": "2026-09-21T13:37:28.812Z",
+    "status": "ready",
+    "progress": 100,
+    "statusMessage": "Model ready"
+  },
+  {
     "id": "gemma2:2b",
     "name": "Gemma 2 2B",
     "baseModelId": "gemma2",
