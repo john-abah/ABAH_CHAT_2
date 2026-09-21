@@ -17,9 +17,7 @@ A local-first, privacy-respecting personal AI companion featuring persistent con
 - [Architecture & Platforms](#-architecture--platforms)
 - [Prerequisites](#-prerequisites)
 - [Installation & Quick Start](#-installation--quick-start)
-  - [Option 1: Modern Web Application (React + Express)](#option-1-modern-web-application-react--express)
-  - [Option 2: Ubuntu Linux Desktop App & CLI](#option-2-ubuntu-linux-desktop-app--cli)
-  - [Option 3: Android Mobile App (APK & Termux)](#option-3-android-mobile-app-apk--termux)
+  - [Modern Web Application (React + Express)](#modern-web-application-react--express)
 - [Ollama Model Management](#-ollama-model-management)
 - [Persistent Memory Engine](#-persistent-memory-engine)
 - [Credits & Contacts](#-credits--contacts)
@@ -79,7 +77,6 @@ A local-first, privacy-respecting personal AI companion featuring persistent con
   ollama serve
   ```
 - **Node.js** (Optional, for Web UI): Node.js 18+ and npm
-- **Python** (For Ubuntu/Android/CLI apps): Python 3.8+ (Python 3.12+ recommended)
 
 ---
 
@@ -92,7 +89,7 @@ git clone https://github.com/john-abah/ABAH_CHAT_2.git
 cd ABAH_CHAT_2
 ```
 
-### Option 1: Modern Web Application (React + Express)
+### Modern Web Application (React + Express)
 
 1. **Install dependencies**:
    ```bash
@@ -110,78 +107,6 @@ cd ABAH_CHAT_2
    npm run build
    npm start
    ```
-
----
-
-### Option 2: Ubuntu Linux Desktop App & CLI
-
-The Python core requires **zero external pip dependencies** and runs with Python's built-in standard library!
-
-#### Method A: 1-Click Desktop Installer (GNOME Application Grid)
-```bash
-chmod +x install_ubuntu.sh
-./install_ubuntu.sh
-```
-This registers **ABAH CHAT** in your Ubuntu applications menu with system search and dock support.
-
-#### Method B: Direct Python Companion Launch
-```bash
-python3 python_app/main.py
-```
-Starts the companion server on `http://localhost:8080` and automatically opens your desktop browser.
-
-#### Method C: Interactive Terminal CLI Mode
-```bash
-python3 python_app/main.py --cli
-```
-Chat with ABAH_CHAT directly in bash or zsh:
-- `/models` — Browse online Ollama library
-- `/pull <model>` — Pull an Ollama model directly
-- `/use <model>` — Switch active model
-- `/memory` — Inspect conversation context
-- `/clear` — Clear conversation history
-
----
-
-### Option 3: Android Mobile App (APK & Termux)
-
-#### Method A: Run Instantly on Android via Termux
-1. Open **Termux** on your Android device (from F-Droid or GitHub).
-2. Clone and launch:
-   ```bash
-   pkg update -y && pkg install python git -y
-   git clone https://github.com/john-abah/ABAH_CHAT_2.git
-   cd ABAH_CHAT_2
-   chmod +x android_run.sh
-   ./android_run.sh
-   ```
-3. Termux launches the server and opens the mobile interface in your Android browser.
-
-#### Method B: Build Native Android APK (Buildozer)
-On your Ubuntu/Linux workstation:
-```bash
-chmod +x build_apk.sh
-./build_apk.sh
-```
-This packages `python_app/android_kivy.py` into a native `.apk` inside `bin/`. Install it to your phone using ADB:
-```bash
-adb install -r bin/abahchat-1.0.0-arm64-v8a-debug.apk
-```
-
-> **Tip for Mobile Users**: In the app settings or via `OLLAMA_BASE_URL`, set the Ollama host to your desktop PC's local network IP (e.g. `http://192.168.1.50:11434`) to harness your PC's GPU while chatting from your phone!
-
----
-
-## 🔄 Ollama Model Management
-
-1. **Pull Models from Terminal**:
-   ```bash
-   ollama pull gemma2:2b
-   ollama pull llama3.2:3b
-   ollama pull deepseek-r1:1.5b
-   ```
-2. **Pull from UI**: Click **Ollama Models** in the top navigation bar, search for any model from `ollama.com/library`, and click **Pull**.
-3. **Switch Active Model**: Select any pulled model from the dropdown or click **Select** in the model browser. Your chat history and memory are retained seamlessly!
 
 ---
 
