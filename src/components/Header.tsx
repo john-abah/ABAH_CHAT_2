@@ -1,7 +1,6 @@
 import React from 'react';
 import { Bot, Database, Trash2, RefreshCw, Cpu, Globe, HardDrive, UploadCloud } from 'lucide-react';
 import { OllamaStatus } from '../types';
-import headerLogo from '../assets/images/abah_chat_heading_1790000297095.jpg';
 
 interface HeaderProps {
   messageCount: number;
@@ -35,13 +34,22 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="max-w-6xl mx-auto flex flex-wrap items-center justify-between gap-3">
         {/* Brand & Heading Image */}
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl overflow-hidden shadow-lg shadow-indigo-500/25 ring-1 ring-cyan-500/40 shrink-0 relative group bg-zinc-950">
+          <div className="w-10 h-10 rounded-xl overflow-hidden shadow-lg shadow-indigo-500/25 ring-1 ring-cyan-500/40 shrink-0 relative group bg-zinc-950 flex items-center justify-center">
             <img
-              src={headerLogo}
+              src="/ABAH_CHAT_AD.png"
               alt="ABAH CHAT"
               className="w-full h-full object-cover object-center group-hover:scale-110 transition-transform duration-300"
               referrerPolicy="no-referrer"
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+                const parent = e.currentTarget.parentElement;
+                const fallback = parent?.querySelector('.header-bot-fallback');
+                if (fallback) fallback.classList.remove('hidden');
+              }}
             />
+            <div className="header-bot-fallback hidden w-full h-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
+              <Bot className="w-5 h-5 text-white" />
+            </div>
           </div>
           <div>
             <div className="flex items-center gap-2">

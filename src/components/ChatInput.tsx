@@ -9,25 +9,32 @@ import {
   Image as ImageIcon,
   Sparkles,
   Search,
+  Link2,
 } from 'lucide-react';
 import { QuickContextPrompts } from './QuickContextPrompts';
-import { ChatAttachment } from '../types';
+import { SharedChatModal } from './SharedChatModal';
+import { ChatAttachment, SharedChatConversation, MemoryState } from '../types';
 
 interface ChatInputProps {
   onSendMessage: (
     message: string,
     attachments?: ChatAttachment[],
-    webSearch?: boolean
+    webSearch?: boolean,
+    sharedChat?: SharedChatConversation
   ) => void;
   isLoading: boolean;
+  onImportSharedChat?: (newMemory: MemoryState, count: number) => void;
 }
 
 export const ChatInput: React.FC<ChatInputProps> = ({
   onSendMessage,
   isLoading,
+  onImportSharedChat,
 }) => {
   const [text, setText] = useState('');
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [sharedChat, setSharedChat] = useState<SharedChatConversation | null>(null);
+  const [isSharedModalOpen, setIsSharedModalOpen] = useState(false);
   const [isWebSearchEnabled, setIsWebSearchEnabled] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
@@ -47,6 +54,12 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
+
+  // Check if current text contains an OpenAI or Claude share link
+  const detectedSharedUrlMatch = text.match(
+    /https?:\/\/(?:www\.)?(?:chatgpt\.com|chat\.openai\.com)\/share\/[a-zA-Z0-9_-]+/i
+  ) || text.match(/https?:\/\/(?:www\.)?claude\.ai\/share\/[a-zA-Z0-9_-]+/i) || text.match(/https?:\/\/(?:www\.)?claude\.site\/[a-zA-Z0-9_-]+/i);
+  const detectedUrl = detectedSharedUrlMatch ? detectedSharedUrlMatch[0] : null;
 
   const processFile = async (file: File): Promise<ChatAttachment> => {
     const isImage = file.type.startsWith('image/');
@@ -114,18 +127,21 @@ export const ChatInput: React.FC<ChatInputProps> = ({
 
   const handleSend = () => {
     const trimmed = text.trim();
-    if ((!trimmed && attachments.length === 0) || isLoading) return;
+    if ((!trimmed && attachments.length === 0 && !sharedChat) || isLoading) return;
 
-    // If user attached files without typing text, default to an intuitive request
+    // If user attached files or shared chat without typing text, default to an intuitive request
     const messageToSend =
       trimmed ||
-      (attachments.length > 0
+      (sharedChat
+        ? `Please analyze this shared ${sharedChat.provider} conversation ("${sharedChat.title}", ${sharedChat.turnCount} turns) and provide key insights.`
+        : attachments.length > 0
         ? `Please analyze and summarize the attached ${attachments.length === 1 ? 'file' : `${attachments.length} files`}.`
         : '');
 
-    onSendMessage(messageToSend, attachments, isWebSearchEnabled);
+    onSendMessage(messageToSend, attachments, isWebSearchEnabled, sharedChat || undefined);
     setText('');
     setAttachments([]);
+    setSharedChat(null);
     setFileError(null);
 
     if (textareaRef.current) {
@@ -141,7 +157,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
   };
 
   const handleSelectPrompt = (prompt: string) => {
-    onSendMessage(prompt, attachments, isWebSearchEnabled);
+    onSendMessage(prompt, attachments, isWebSearchEnabled, sharedChat || undefined);
   };
 
   const getFileIcon = (att: ChatAttachment) => {
@@ -192,9 +208,31 @@ export const ChatInput: React.FC<ChatInputProps> = ({
       <div className="max-w-3xl mx-auto space-y-2">
         <QuickContextPrompts onSelectPrompt={handleSelectPrompt} disabled={isLoading} />
 
-        {/* File Attachments List Preview */}
-        {attachments.length > 0 && (
+        {/* Attachments & Shared Chat List Preview */}
+        {(attachments.length > 0 || sharedChat) && (
           <div className="flex flex-wrap gap-2 pt-1 animate-in fade-in">
+            {/* Attached Shared Chat Badge */}
+            {sharedChat && (
+              <div className="flex items-center gap-2 bg-blue-950/60 border border-blue-700/80 rounded-xl px-2.5 py-1.5 text-xs text-blue-200 group shadow-sm">
+                <Link2 className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                <span className="font-semibold text-blue-300 max-w-[180px] truncate" title={sharedChat.title}>
+                  {sharedChat.title}
+                </span>
+                <span className="text-[10px] bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded font-mono">
+                  {sharedChat.provider} &bull; {sharedChat.turnCount} turns
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSharedChat(null)}
+                  className="text-blue-400 hover:text-red-400 p-0.5 rounded transition-colors ml-1"
+                  title="Remove shared chat"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
+            {/* File Attachments */}
             {attachments.map((att, i) => (
               <div
                 key={i}
@@ -228,6 +266,25 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           </div>
         )}
 
+        {/* Auto-detected shared link prompt banner */}
+        {detectedUrl && !sharedChat && (
+          <div className="flex items-center justify-between text-xs bg-blue-950/40 border border-blue-800/60 rounded-xl px-3 py-1.5 text-blue-200 animate-in fade-in">
+            <span className="flex items-center gap-1.5 truncate">
+              <Link2 className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+              <span className="truncate">
+                Shared AI Link detected in input (<code className="font-mono text-blue-300">{detectedUrl}</code>)
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={() => setIsSharedModalOpen(true)}
+              className="text-blue-400 hover:text-blue-200 font-medium underline underline-offset-2 ml-2 shrink-0 text-[11px]"
+            >
+              Inspect / Attach
+            </button>
+          </div>
+        )}
+
         {/* File Error Notice */}
         {fileError && (
           <div className="text-[11px] text-red-400 bg-red-950/40 border border-red-800/60 rounded-lg px-2.5 py-1 flex items-center justify-between">
@@ -252,7 +309,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({
             onKeyDown={handleKeyDown}
             disabled={isLoading}
             placeholder={
-              attachments.length > 0
+              sharedChat
+                ? `Ask questions, infer on, or summarize "${sharedChat.title}"...`
+                : attachments.length > 0
                 ? "Ask a question about the attached file(s)..."
                 : isWebSearchEnabled
                 ? "Search the internet or ask any live question..."
@@ -263,8 +322,8 @@ export const ChatInput: React.FC<ChatInputProps> = ({
 
           {/* Action Toolbar Inside Input Bar */}
           <div className="flex items-center justify-between pt-1 px-1.5 border-t border-zinc-900">
-            {/* Left Controls: File Attachment & Web Search */}
-            <div className="flex items-center gap-1.5">
+            {/* Left Controls: File Attachment, Shared Chat & Web Search */}
+            <div className="flex items-center gap-1.5 flex-wrap">
               {/* Hidden File Input */}
               <input
                 ref={fileInputRef}
@@ -285,10 +344,32 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                 onClick={() => fileInputRef.current?.click()}
                 disabled={isLoading}
                 className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 border border-transparent hover:border-zinc-800 transition-all"
-                title="Attach files (code, text, data, images) for model inference"
+                title="Attach files (code, text, data, images, PDFs) for model inference"
               >
                 <Paperclip className="w-3.5 h-3.5" />
                 <span className="hidden sm:inline">Attach File</span>
+              </button>
+
+              {/* Shared Chat Link (OpenAI / Claude) Button */}
+              <button
+                type="button"
+                id="open-shared-chat-btn"
+                onClick={() => setIsSharedModalOpen(true)}
+                disabled={isLoading}
+                className={`flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-medium transition-all ${
+                  sharedChat
+                    ? 'bg-blue-950/60 text-blue-300 border border-blue-700/60 shadow-sm shadow-blue-950/50'
+                    : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 border border-transparent hover:border-zinc-800'
+                }`}
+                title="Read, inspect, or infer on OpenAI ChatGPT or Anthropic Claude shared link"
+              >
+                <Link2 className={`w-3.5 h-3.5 ${sharedChat ? 'text-blue-300' : 'text-blue-400'}`} />
+                <span className="hidden sm:inline">Shared Chat</span>
+                {sharedChat && (
+                  <span className="text-[9px] px-1 rounded uppercase tracking-wider font-mono bg-blue-500/20 text-blue-300">
+                    Active
+                  </span>
+                )}
               </button>
 
               {/* DuckDuckGo Web Search Toggle */}
@@ -327,7 +408,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
               id="send-message-btn"
               type="button"
               onClick={handleSend}
-              disabled={isLoading || (!text.trim() && attachments.length === 0)}
+              disabled={isLoading || (!text.trim() && attachments.length === 0 && !sharedChat)}
               className="h-8 px-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white flex items-center justify-center gap-1.5 shrink-0 transition-all disabled:opacity-30 disabled:pointer-events-none shadow-sm shadow-indigo-600/30 font-medium text-xs"
               title="Send message"
             >
@@ -352,7 +433,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                 <span>Internet Grounding Active</span>
               </span>
             )}
-            <span>Drag files anywhere to attach &bull; Press Enter to send</span>
+            <span>Paste ChatGPT/Claude link or drag files &bull; Enter to send</span>
           </span>
           <span className="flex items-center gap-1">
             <Sparkles className="w-3 h-3 text-amber-400" />
@@ -360,6 +441,27 @@ export const ChatInput: React.FC<ChatInputProps> = ({
           </span>
         </div>
       </div>
+
+      {/* Shared Chat Reader & Inference Modal */}
+      <SharedChatModal
+        isOpen={isSharedModalOpen}
+        onClose={() => setIsSharedModalOpen(false)}
+        onAttachToMessage={(conv) => {
+          setSharedChat(conv);
+          if (!text.trim()) {
+            setText(`Please review and infer on this shared ${conv.provider} conversation: "${conv.title}".`);
+          }
+        }}
+        onImportToMemory={(newMem, count) => {
+          if (onImportSharedChat) {
+            onImportSharedChat(newMem, count);
+          }
+        }}
+        onDirectInfer={(promptText, conv) => {
+          setSharedChat(conv);
+          onSendMessage(promptText, attachments, isWebSearchEnabled, conv);
+        }}
+      />
     </div>
   );
 };

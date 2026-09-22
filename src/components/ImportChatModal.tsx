@@ -12,6 +12,8 @@ import {
   ArrowRight,
   Bot,
   User,
+  Link2,
+  Sparkles,
 } from 'lucide-react';
 import { ChatMessage, MemoryState } from '../types';
 
@@ -26,8 +28,10 @@ export const ImportChatModal: React.FC<ImportChatModalProps> = ({
   onClose,
   onImportSuccess,
 }) => {
-  const [activeTab, setActiveTab] = useState<'upload' | 'paste'>('upload');
+  const [activeTab, setActiveTab] = useState<'upload' | 'paste' | 'shared_link'>('upload');
   const [pasteContent, setPasteContent] = useState('');
+  const [sharedUrl, setSharedUrl] = useState('');
+  const [isFetchingUrl, setIsFetchingUrl] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
   const [fileSize, setFileSize] = useState<string | null>(null);
   const [parsedMessages, setParsedMessages] = useState<ChatMessage[] | null>(null);
@@ -39,6 +43,52 @@ export const ImportChatModal: React.FC<ImportChatModalProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
+
+  const handleFetchSharedUrl = async (customUrl?: string) => {
+    const target = (customUrl || sharedUrl).trim();
+    if (!target) {
+      setParseError('Please enter an OpenAI or Claude share link.');
+      return;
+    }
+
+    setParseError(null);
+    setIsFetchingUrl(true);
+
+    try {
+      const res = await fetch('/api/shared-chat/fetch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: target }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `HTTP ${res.status}`);
+      }
+
+      const data = await res.json();
+      if (!data.conversation || !Array.isArray(data.conversation.messages)) {
+        throw new Error('Could not parse conversation turns from this link.');
+      }
+
+      const conv = data.conversation;
+      const normalized: ChatMessage[] = conv.messages.map((m: any, idx: number) => ({
+        id: m.id || `shared-${Date.now()}-${idx}`,
+        content: m.content,
+        source: m.role === 'user' ? 'user' : 'chatter',
+        type: m.role === 'user' ? 'UserMessage' : 'AssistantMessage',
+        timestamp: m.timestamp || new Date(Date.now() - (conv.messages.length - idx) * 60000).toISOString(),
+      }));
+
+      setParsedMessages(normalized);
+      setFileName(`${conv.provider}: ${conv.title}`);
+      setFileSize(`${normalized.length} turns`);
+    } catch (err: any) {
+      setParseError(err.message || 'Failed to fetch shared chat link.');
+    } finally {
+      setIsFetchingUrl(false);
+    }
+  };
 
   const parseRawContent = (raw: string, sourceName = 'pasted_text.json') => {
     setParseError(null);
@@ -274,6 +324,17 @@ export const ImportChatModal: React.FC<ImportChatModalProps> = ({
             <FileText className="w-3.5 h-3.5" />
             Paste Text or JSON
           </button>
+          <button
+            onClick={() => setActiveTab('shared_link')}
+            className={`pb-2.5 px-3 text-xs font-medium border-b-2 transition-all flex items-center gap-1.5 ${
+              activeTab === 'shared_link'
+                ? 'border-blue-500 text-blue-300'
+                : 'border-transparent text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <Link2 className="w-3.5 h-3.5 text-blue-400" />
+            Shared AI Link (ChatGPT / Claude)
+          </button>
         </div>
 
         {/* Modal Body */}
@@ -314,7 +375,7 @@ export const ImportChatModal: React.FC<ImportChatModalProps> = ({
                 </div>
               )}
             </div>
-          ) : (
+          ) : activeTab === 'paste' ? (
             <div className="space-y-2">
               <label className="text-xs font-medium text-zinc-300 flex items-center justify-between">
                 <span>Paste Raw JSON or Text Transcript</span>
@@ -330,6 +391,60 @@ export const ImportChatModal: React.FC<ImportChatModalProps> = ({
                 placeholder={`Example JSON:\n{\n  "llm_context": {\n    "messages": [\n      {"source": "user", "content": "Hello!"},\n      {"source": "chatter", "content": "Hi there!"}\n    ]\n  }\n}`}
                 className="w-full bg-zinc-950 border border-zinc-800 focus:border-indigo-500 rounded-xl p-3 text-xs font-mono text-zinc-200 placeholder-zinc-600 focus:outline-none leading-relaxed"
               />
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <label className="text-xs font-medium text-zinc-300 flex items-center justify-between">
+                <span>Enter OpenAI or Claude Shared Chat URL</span>
+                <span className="text-blue-400 text-[11px]">Public shared link</span>
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="url"
+                  value={sharedUrl}
+                  onChange={(e) => setSharedUrl(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleFetchSharedUrl();
+                    }
+                  }}
+                  placeholder="https://chatgpt.com/share/... or https://claude.ai/share/..."
+                  className="w-full bg-zinc-950 border border-zinc-800 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-mono text-zinc-200 placeholder-zinc-600 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleFetchSharedUrl()}
+                  disabled={isFetchingUrl || !sharedUrl.trim()}
+                  className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-medium rounded-xl flex items-center gap-1.5 transition-all shrink-0"
+                >
+                  {isFetchingUrl ? (
+                    <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  ) : (
+                    <>
+                      <span>Fetch</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </>
+                  )}
+                </button>
+              </div>
+              <div className="flex items-center justify-between text-[11px] text-zinc-500">
+                <span className="flex items-center gap-1">
+                  <Sparkles className="w-3 h-3 text-amber-400" />
+                  <span>Directly inlines dialogue into persistent memory</span>
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const sample = 'https://chatgpt.com/share/6ab2387e-4aa0-83eb-b566-41c2a6696548';
+                    setSharedUrl(sample);
+                    handleFetchSharedUrl(sample);
+                  }}
+                  className="text-blue-400 hover:text-blue-300 underline"
+                >
+                  Use sample link (Wohnungsanfrage)
+                </button>
+              </div>
             </div>
           )}
 

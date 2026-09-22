@@ -6,7 +6,7 @@ import { MemoryInspector } from './components/MemoryInspector';
 import { ImportChatModal } from './components/ImportChatModal';
 import { OllamaModelPicker } from './components/OllamaModelPicker';
 import { OllamaSettingsModal } from './components/OllamaSettingsModal';
-import { MemoryState, OllamaStatus, PulledOllamaModel, ChatAttachment } from './types';
+import { MemoryState, OllamaStatus, PulledOllamaModel, ChatAttachment, SharedChatConversation } from './types';
 import { AlertCircle, CheckCircle2 } from 'lucide-react';
 
 export default function App() {
@@ -113,9 +113,10 @@ export default function App() {
   const handleSendMessage = async (
     text: string,
     attachments?: ChatAttachment[],
-    webSearch?: boolean
+    webSearch?: boolean,
+    sharedChat?: SharedChatConversation
   ) => {
-    if (!text.trim() && (!attachments || attachments.length === 0)) return;
+    if (!text.trim() && (!attachments || attachments.length === 0) && !sharedChat) return;
 
     setErrorNotice(null);
     setIsLoading(true);
@@ -131,7 +132,7 @@ export default function App() {
           messages: [
             ...prevMessages,
             {
-              content: text,
+              content: text || (sharedChat ? `Analyze shared chat: "${sharedChat.title}" (${sharedChat.provider})` : ''),
               source: 'user',
               type: 'UserMessage',
               timestamp: optimisticTimestamp,
@@ -151,6 +152,7 @@ export default function App() {
           model: selectedModel,
           attachments,
           webSearch,
+          sharedChat,
         }),
       });
 

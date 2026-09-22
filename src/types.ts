@@ -116,3 +116,21 @@ export interface OllamaStatus {
   pulledCount?: number;
   error?: string | null;
 }
+
+export interface SharedChatMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp?: string;
+}
+
+export interface SharedChatConversation {
+  url: string;
+  provider: 'OpenAI ChatGPT' | 'Anthropic Claude' | 'Shared AI Chat';
+  title: string;
+  sharedId?: string;
+  messages: SharedChatMessage[];
+  turnCount: number;
+  summary?: string;
+  fetchedAt: string;
+}

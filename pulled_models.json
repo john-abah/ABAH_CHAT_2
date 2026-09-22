@@ -1,5 +1,31 @@
 [
   {
+    "id": "smollm:135m",
+    "name": "Smollm (135m)",
+    "baseModelId": "smollm",
+    "tag": "135m",
+    "parameterSize": "135M",
+    "size": "1.6 GB",
+    "description": "Pulled from Ollama library (smollm:135m)",
+    "pulledAt": "2026-09-22T08:14:47.784Z",
+    "status": "pulling",
+    "progress": 8,
+    "statusMessage": "Connecting to Ollama registry & verifying layer manifests..."
+  },
+  {
+    "id": "llama3.2:1b",
+    "name": "Llama3.2 (1b)",
+    "baseModelId": "llama3.2",
+    "tag": "1b",
+    "parameterSize": "1B",
+    "size": "1.6 GB",
+    "description": "Pulled from Ollama library (llama3.2:1b)",
+    "pulledAt": "2026-09-22T08:10:42.866Z",
+    "status": "ready",
+    "progress": 100,
+    "statusMessage": "Model ready"
+  },
+  {
     "id": "phi4:latest",
     "name": "Phi4",
     "baseModelId": "phi4",

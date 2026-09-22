@@ -62,11 +62,25 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({
       <div className="flex-1 flex flex-col items-center justify-center p-6 text-center overflow-y-auto">
         <div className="max-w-md mx-auto flex flex-col items-center">
           <div className="relative mb-4">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-indigo-600 via-indigo-500 to-purple-600 flex items-center justify-center shadow-xl shadow-indigo-500/20 ring-1 ring-white/20">
-              <Bot className="w-8 h-8 text-white" />
+            <div className="w-20 h-20 rounded-2xl overflow-hidden shadow-2xl shadow-indigo-500/30 ring-2 ring-indigo-500/40 relative group bg-zinc-950 flex items-center justify-center">
+              <img
+                src="/ABAH_CHAT_AD.png"
+                alt="ABAH CHAT"
+                className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-300"
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                  const parent = e.currentTarget.parentElement;
+                  const fallback = parent?.querySelector('.empty-bot-fallback');
+                  if (fallback) fallback.classList.remove('hidden');
+                }}
+              />
+              <div className="empty-bot-fallback hidden w-full h-full bg-gradient-to-tr from-indigo-600 via-indigo-500 to-purple-600 flex items-center justify-center">
+                <Bot className="w-10 h-10 text-white" />
+              </div>
             </div>
-            <div className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-emerald-500 border-2 border-zinc-950 flex items-center justify-center">
-              <Sparkles className="w-3 h-3 text-white" />
+            <div className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full bg-emerald-500 border-2 border-zinc-950 flex items-center justify-center shadow-md">
+              <Sparkles className="w-3.5 h-3.5 text-white" />
             </div>
           </div>
 
