@@ -153,6 +153,8 @@ export default function App() {
           attachments,
           webSearch,
           sharedChat,
+          clientTime: new Date().toISOString(),
+          clientTimeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
         }),
       });
 

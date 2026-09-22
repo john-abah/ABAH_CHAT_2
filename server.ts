@@ -359,9 +359,16 @@ function getAI(): GoogleGenAI | null {
 }
 
 // Generate Gemini response with automatic multi-model failover (gemini-3.8-flash -> gemini-3.6-flash -> gemini-3.1-flash-lite)
-async function generateGeminiResponse(ai: GoogleGenAI, contents: any[]): Promise<string> {
+async function generateGeminiResponse(
+  ai: GoogleGenAI,
+  contents: any[],
+  systemInstruction?: string
+): Promise<string> {
   const candidateModels = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.1-flash-lite'];
   let lastError: any = null;
+
+  const defaultInstruction =
+    'You are a personal loyal companion. You answer concisely and accurately. You have persistent memory of past conversations, can read and analyze attached files (PDFs, text files, and images), and cite live web search and real-time world clock results.';
 
   for (const modelName of candidateModels) {
     try {
@@ -369,8 +376,7 @@ async function generateGeminiResponse(ai: GoogleGenAI, contents: any[]): Promise
         model: modelName,
         contents,
         config: {
-          systemInstruction:
-            'You are a personal loyal companion. You answer concisely and accurately. You have persistent memory of past conversations, can read and analyze attached files (PDFs, text files, and images), and cite live web search results.',
+          systemInstruction: systemInstruction || defaultInstruction,
           temperature: 0.2,
         },
       });
@@ -1162,35 +1168,447 @@ app.post('/api/memory/import', (req, res) => {
   }
 });
 
-// Free Internet Search Engine (DuckDuckGo + Wikipedia + HackerNews)
-async function searchFreeInternet(query: string): Promise<SearchSource[]> {
+// ==========================================
+// FREE INTERNET SEARCH & REAL-TIME GROUNDING ENGINE
+// Multi-Engine: Real-Time World Clock Resolver + DuckDuckGo HTML Web Scraper + Google News RSS + Wikipedia REST + HackerNews Algolia
+// 100% Free of charge / Zero API keys required
+// ==========================================
+
+const WORLD_CITIES: Record<string, string> = {
+  // UK & Ireland
+  london: 'Europe/London',
+  uk: 'Europe/London',
+  england: 'Europe/London',
+  britain: 'Europe/London',
+  manchester: 'Europe/London',
+  birmingham: 'Europe/London',
+  edinburgh: 'Europe/London',
+  glasgow: 'Europe/London',
+  dublin: 'Europe/Dublin',
+  ireland: 'Europe/Dublin',
+
+  // Western & Central Europe
+  berlin: 'Europe/Berlin',
+  germany: 'Europe/Berlin',
+  deutschland: 'Europe/Berlin',
+  paderborn: 'Europe/Berlin',
+  munich: 'Europe/Berlin',
+  frankfurt: 'Europe/Berlin',
+  hamburg: 'Europe/Berlin',
+  cologne: 'Europe/Berlin',
+  paris: 'Europe/Paris',
+  france: 'Europe/Paris',
+  rome: 'Europe/Rome',
+  italy: 'Europe/Rome',
+  milan: 'Europe/Rome',
+  madrid: 'Europe/Madrid',
+  spain: 'Europe/Madrid',
+  barcelona: 'Europe/Madrid',
+  amsterdam: 'Europe/Amsterdam',
+  netherlands: 'Europe/Amsterdam',
+  brussels: 'Europe/Brussels',
+  belgium: 'Europe/Brussels',
+  vienna: 'Europe/Vienna',
+  austria: 'Europe/Vienna',
+  zurich: 'Europe/Zurich',
+  geneva: 'Europe/Zurich',
+  switzerland: 'Europe/Zurich',
+  stockholm: 'Europe/Stockholm',
+  sweden: 'Europe/Stockholm',
+  oslo: 'Europe/Oslo',
+  norway: 'Europe/Oslo',
+  copenhagen: 'Europe/Copenhagen',
+  denmark: 'Europe/Copenhagen',
+  helsinki: 'Europe/Helsinki',
+  finland: 'Europe/Helsinki',
+  warsaw: 'Europe/Warsaw',
+  poland: 'Europe/Warsaw',
+  prague: 'Europe/Prague',
+  czechia: 'Europe/Prague',
+  lisbon: 'Europe/Lisbon',
+  portugal: 'Europe/Lisbon',
+  athens: 'Europe/Athens',
+  greece: 'Europe/Athens',
+  moscow: 'Europe/Moscow',
+  russia: 'Europe/Moscow',
+  kyiv: 'Europe/Kyiv',
+  ukraine: 'Europe/Kyiv',
+  istanbul: 'Europe/Istanbul',
+  turkey: 'Europe/Istanbul',
+
+  // Africa
+  lagos: 'Africa/Lagos',
+  nigeria: 'Africa/Lagos',
+  abuja: 'Africa/Lagos',
+  kano: 'Africa/Lagos',
+  ibadan: 'Africa/Lagos',
+  accra: 'Africa/Accra',
+  ghana: 'Africa/Accra',
+  cairo: 'Africa/Cairo',
+  egypt: 'Africa/Cairo',
+  johannesburg: 'Africa/Johannesburg',
+  'south africa': 'Africa/Johannesburg',
+  'cape town': 'Africa/Johannesburg',
+  durban: 'Africa/Johannesburg',
+  nairobi: 'Africa/Nairobi',
+  kenya: 'Africa/Nairobi',
+  addis: 'Africa/Addis_Ababa',
+  'addis ababa': 'Africa/Addis_Ababa',
+  ethiopia: 'Africa/Addis_Ababa',
+  casablanca: 'Africa/Casablanca',
+  morocco: 'Africa/Casablanca',
+  rabat: 'Africa/Casablanca',
+  algiers: 'Africa/Algiers',
+  algeria: 'Africa/Algiers',
+  tunis: 'Africa/Tunis',
+  tunisia: 'Africa/Tunis',
+  kampala: 'Africa/Kampala',
+  uganda: 'Africa/Kampala',
+  kigali: 'Africa/Kigali',
+  rwanda: 'Africa/Kigali',
+  dakar: 'Africa/Dakar',
+  senegal: 'Africa/Dakar',
+
+  // North America
+  'new york': 'America/New_York',
+  nyc: 'America/New_York',
+  boston: 'America/New_York',
+  washington: 'America/New_York',
+  dc: 'America/New_York',
+  miami: 'America/New_York',
+  atlanta: 'America/New_York',
+  philadelphia: 'America/New_York',
+  chicago: 'America/Chicago',
+  houston: 'America/Chicago',
+  dallas: 'America/Chicago',
+  austin: 'America/Chicago',
+  denver: 'America/Denver',
+  colorado: 'America/Denver',
+  phoenix: 'America/Phoenix',
+  arizona: 'America/Phoenix',
+  'los angeles': 'America/Los_Angeles',
+  la: 'America/Los_Angeles',
+  california: 'America/Los_Angeles',
+  'san francisco': 'America/Los_Angeles',
+  sf: 'America/Los_Angeles',
+  seattle: 'America/Los_Angeles',
+  toronto: 'America/Toronto',
+  canada: 'America/Toronto',
+  vancouver: 'America/Vancouver',
+  montreal: 'America/Toronto',
+  ottawa: 'America/Toronto',
+  calgary: 'America/Edmonton',
+  'mexico city': 'America/Mexico_City',
+  mexico: 'America/Mexico_City',
+
+  // South America
+  'sao paulo': 'America/Sao_Paulo',
+  brazil: 'America/Sao_Paulo',
+  'rio de janeiro': 'America/Sao_Paulo',
+  'buenos aires': 'America/Argentina/Buenos_Aires',
+  argentina: 'America/Argentina/Buenos_Aires',
+  santiago: 'America/Santiago',
+  chile: 'America/Santiago',
+  bogota: 'America/Bogota',
+  colombia: 'America/Bogota',
+  lima: 'America/Lima',
+  peru: 'America/Lima',
+
+  // Asia & Middle East
+  tokyo: 'Asia/Tokyo',
+  japan: 'Asia/Tokyo',
+  kyoto: 'Asia/Tokyo',
+  osaka: 'Asia/Tokyo',
+  seoul: 'Asia/Seoul',
+  korea: 'Asia/Seoul',
+  'south korea': 'Asia/Seoul',
+  beijing: 'Asia/Shanghai',
+  china: 'Asia/Shanghai',
+  shanghai: 'Asia/Shanghai',
+  shenzhen: 'Asia/Shanghai',
+  guangzhou: 'Asia/Shanghai',
+  'hong kong': 'Asia/Hong_Kong',
+  taipei: 'Asia/Taipei',
+  taiwan: 'Asia/Taipei',
+  singapore: 'Asia/Singapore',
+  bangkok: 'Asia/Bangkok',
+  thailand: 'Asia/Bangkok',
+  jakarta: 'Asia/Jakarta',
+  indonesia: 'Asia/Jakarta',
+  manila: 'Asia/Manila',
+  philippines: 'Asia/Manila',
+  'kuala lumpur': 'Asia/Kuala_Lumpur',
+  malaysia: 'Asia/Kuala_Lumpur',
+  delhi: 'Asia/Kolkata',
+  'new delhi': 'Asia/Kolkata',
+  india: 'Asia/Kolkata',
+  mumbai: 'Asia/Kolkata',
+  bangalore: 'Asia/Kolkata',
+  bengaluru: 'Asia/Kolkata',
+  hyderabad: 'Asia/Kolkata',
+  chennai: 'Asia/Kolkata',
+  kolkata: 'Asia/Kolkata',
+  karachi: 'Asia/Karachi',
+  pakistan: 'Asia/Karachi',
+  lahore: 'Asia/Karachi',
+  islamabad: 'Asia/Karachi',
+  dhaka: 'Asia/Dhaka',
+  bangladesh: 'Asia/Dhaka',
+  colombo: 'Asia/Colombo',
+  'sri lanka': 'Asia/Colombo',
+  dubai: 'Asia/Dubai',
+  uae: 'Asia/Dubai',
+  'abu dhabi': 'Asia/Dubai',
+  doha: 'Asia/Qatar',
+  qatar: 'Asia/Qatar',
+  riyadh: 'Asia/Riyadh',
+  'saudi arabia': 'Asia/Riyadh',
+  jeddah: 'Asia/Riyadh',
+  muscat: 'Asia/Muscat',
+  oman: 'Asia/Muscat',
+  kuwait: 'Asia/Kuwait',
+  bahrain: 'Asia/Bahrain',
+  manama: 'Asia/Bahrain',
+  beirut: 'Asia/Beirut',
+  lebanon: 'Asia/Beirut',
+  amman: 'Asia/Amman',
+  jordan: 'Asia/Amman',
+  jerusalem: 'Asia/Jerusalem',
+  israel: 'Asia/Jerusalem',
+  'tel aviv': 'Asia/Jerusalem',
+  tehran: 'Asia/Tehran',
+  iran: 'Asia/Tehran',
+
+  // Oceania
+  sydney: 'Australia/Sydney',
+  australia: 'Australia/Sydney',
+  melbourne: 'Australia/Melbourne',
+  brisbane: 'Australia/Brisbane',
+  perth: 'Australia/Perth',
+  adelaide: 'Australia/Adelaide',
+  auckland: 'Pacific/Auckland',
+  'new zealand': 'Pacific/Auckland',
+  wellington: 'Pacific/Auckland',
+
+  // Standards
+  utc: 'UTC',
+  gmt: 'GMT',
+};
+
+interface TemporalGrounding {
+  isTimeQuery: boolean;
+  utcStr: string;
+  userStr: string;
+  userTz: string;
+  targetLocation?: string;
+  targetTz?: string;
+  targetStr?: string;
+  iso: string;
+  explanation: string;
+}
+
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function resolveTemporalGrounding(query: string, userTimeZone = 'UTC'): TemporalGrounding {
+  let userTz = 'UTC';
+  try {
+    Intl.DateTimeFormat(undefined, { timeZone: userTimeZone });
+    userTz = userTimeZone;
+  } catch {
+    userTz = 'UTC';
+  }
+
+  const q = query.toLowerCase();
+  const isTimeQuery =
+    /\b(time|date|today|clock|now|hour|timezone|time zone|day of the week|what day|yesterday|tomorrow|year|month|calendar)\b/i.test(
+      q
+    );
+
+  let targetLocation: string | undefined = undefined;
+  let targetTz = userTz;
+
+  // 1. Check known world cities dictionary
+  for (const [name, tz] of Object.entries(WORLD_CITIES)) {
+    const rx = new RegExp(`\\b${name.replace(/ /g, '\\s+')}\\b`, 'i');
+    if (rx.test(q)) {
+      targetLocation = name
+        .split(' ')
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+        .join(' ');
+      targetTz = tz;
+      break;
+    }
+  }
+
+  // 2. If not found in dictionary, check against standard IANA supported timezones
+  if (!targetLocation) {
+    try {
+      const allTzs = Intl.supportedValuesOf('timeZone');
+      for (const tz of allTzs) {
+        const parts = tz.toLowerCase().split('/');
+        const cityPart = parts[parts.length - 1].replace(/_/g, ' ');
+        const rx = new RegExp(`\\b${cityPart}\\b`, 'i');
+        if (rx.test(q)) {
+          targetLocation = cityPart
+            .split(' ')
+            .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+            .join(' ');
+          targetTz = tz;
+          break;
+        }
+      }
+    } catch {
+      // Fallback
+    }
+  }
+
+  const now = new Date();
+  const utcStr = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC',
+    dateStyle: 'full',
+    timeStyle: 'long',
+  }).format(now);
+
+  const userStr = new Intl.DateTimeFormat('en-US', {
+    timeZone: userTz,
+    dateStyle: 'full',
+    timeStyle: 'long',
+  }).format(now);
+
+  const targetStr = new Intl.DateTimeFormat('en-US', {
+    timeZone: targetTz,
+    dateStyle: 'full',
+    timeStyle: 'long',
+  }).format(now);
+
+  let explanation = '';
+  if (targetLocation) {
+    explanation = `Verified live time in ${targetLocation} (${targetTz}): ${targetStr}. (UTC: ${utcStr} • User local: ${userStr}).`;
+  } else {
+    explanation = `Verified current time: ${userStr} (Timezone: ${userTz}). Current UTC: ${utcStr}.`;
+  }
+
+  return {
+    isTimeQuery,
+    utcStr,
+    userStr,
+    userTz,
+    targetLocation,
+    targetTz,
+    targetStr,
+    iso: now.toISOString(),
+    explanation,
+  };
+}
+
+// Free Internet Search Engine (World Clock + DuckDuckGo HTML + Google News RSS + Wikipedia + HackerNews)
+async function searchFreeInternet(query: string, userTimeZone = 'UTC'): Promise<SearchSource[]> {
   const sources: SearchSource[] = [];
   const cleanQuery = query.replace(/[^\w\s\d.-]/gi, ' ').trim();
   if (!cleanQuery) return sources;
 
-  const sanitizeSnippet = (text: string): string => {
-    return text
-      .replace(/<[^>]+>/g, ' ')
-      .replace(/&quot;/g, '"')
-      .replace(/&#39;/g, "'")
-      .replace(/&amp;/g, '&')
-      .replace(/&lt;/g, '<')
-      .replace(/&gt;/g, '>')
-      .replace(/\s+/g, ' ')
-      .trim();
-  };
+  const temporal = resolveTemporalGrounding(query, userTimeZone);
+  if (temporal.isTimeQuery) {
+    sources.push({
+      title: `Live World Clock: ${temporal.targetLocation || 'Current Time'}`,
+      url: `https://time.is/${encodeURIComponent((temporal.targetLocation || 'UTC').replace(/\s+/g, '_'))}`,
+      snippet: temporal.explanation,
+    });
+  }
 
   const tasks: Promise<void>[] = [];
 
-  // 1. DuckDuckGo Instant Answer API
+  // 1. DuckDuckGo Full HTML Web Search (Live web results, real snippets, canonical URLs)
+  tasks.push(
+    (async () => {
+      try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 4500);
+
+        const ddgRes = await fetch(
+          `https://html.duckduckgo.com/html/?q=${encodeURIComponent(cleanQuery)}`,
+          {
+            signal: controller.signal,
+            headers: {
+              'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+              Accept:
+                'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+              'Accept-Language': 'en-US,en;q=0.9',
+              'Cache-Control': 'no-cache',
+            },
+          }
+        );
+        clearTimeout(timeout);
+
+        if (ddgRes.ok) {
+          const html = await ddgRes.text();
+          const linkMatches = [
+            ...html.matchAll(
+              /<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi
+            ),
+          ];
+          const snippetMatches = [
+            ...html.matchAll(
+              /<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/gi
+            ),
+          ];
+
+          for (let i = 0; i < Math.min(linkMatches.length, snippetMatches.length, 5); i++) {
+            const rawHref = linkMatches[i][1];
+            const title = decodeHtmlEntities(linkMatches[i][2]);
+            const snippet = decodeHtmlEntities(snippetMatches[i][1]);
+
+            let targetUrl = rawHref;
+            if (rawHref.includes('uddg=')) {
+              try {
+                const u = new URL(
+                  'https:' + (rawHref.startsWith('//') ? rawHref : '//duckduckgo.com' + rawHref)
+                );
+                const uddg = u.searchParams.get('uddg');
+                if (uddg) targetUrl = decodeURIComponent(uddg);
+              } catch {
+                // Keep rawHref
+              }
+            }
+
+            if (title && snippet && targetUrl.startsWith('http')) {
+              sources.push({
+                title,
+                url: targetUrl,
+                snippet,
+              });
+            }
+          }
+        }
+      } catch {
+        // Continue with other sources
+      }
+    })()
+  );
+
+  // 2. Google News Real-Time RSS Search (Breaking news and verified publication dates)
   tasks.push(
     (async () => {
       try {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 4000);
 
-        const ddgRes = await fetch(
-          `https://api.duckduckgo.com/?q=${encodeURIComponent(cleanQuery)}&format=json&no_html=1&skip_disambig=1`,
+        const newsRes = await fetch(
+          `https://news.google.com/rss/search?q=${encodeURIComponent(cleanQuery)}&hl=en-US&gl=US&ceid=US:en`,
           {
             signal: controller.signal,
             headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
@@ -1198,45 +1616,52 @@ async function searchFreeInternet(query: string): Promise<SearchSource[]> {
         );
         clearTimeout(timeout);
 
-        if (ddgRes.ok) {
-          const data = (await ddgRes.json()) as any;
-          if (data.AbstractText && data.AbstractURL) {
-            sources.push({
-              title: data.Heading || cleanQuery,
-              url: data.AbstractURL,
-              snippet: data.AbstractText,
-            });
-          }
-          if (Array.isArray(data.RelatedTopics)) {
-            for (const topic of data.RelatedTopics) {
-              if (topic.Text && topic.FirstURL && sources.length < 5) {
-                sources.push({
-                  title: topic.Text.split(' - ')[0] || topic.Text.slice(0, 60),
-                  url: topic.FirstURL,
-                  snippet: topic.Text,
-                });
-              }
+        if (newsRes.ok) {
+          const xml = await newsRes.text();
+          const items = [...xml.matchAll(/<item>([\s\S]*?)<\/item>/gi)];
+          for (const item of items.slice(0, 3)) {
+            const raw = item[1];
+            const titleM = raw.match(/<title>([\s\S]*?)<\/title>/i);
+            const linkM = raw.match(/<link>([\s\S]*?)<\/link>/i);
+            const pubM = raw.match(/<pubDate>([\s\S]*?)<\/pubDate>/i);
+            const descM = raw.match(/<description>([\s\S]*?)<\/description>/i);
+
+            const title = titleM
+              ? decodeHtmlEntities(titleM[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1'))
+              : '';
+            const url = linkM ? linkM[1].trim() : '';
+            const pubDate = pubM ? pubM[1].trim() : '';
+            const snippet = descM
+              ? decodeHtmlEntities(descM[1].replace(/<!\[CDATA\[(.*?)\]\]>/g, '$1'))
+              : '';
+
+            if (title && url) {
+              sources.push({
+                title: `[News] ${title}`,
+                url,
+                snippet: pubDate ? `[Published: ${pubDate}] ${snippet || title}` : snippet || title,
+              });
             }
           }
         }
       } catch {
-        // Ignore fallback
+        // Ignore
       }
     })()
   );
 
-  // 2. Wikipedia Search API (Free, high-speed, encyclopedic facts)
+  // 3. Wikipedia Search API (Free, high-speed, encyclopedic facts)
   tasks.push(
     (async () => {
       try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 4000);
+        const timeout = setTimeout(() => controller.abort(), 3500);
 
         const wikiRes = await fetch(
-          `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(cleanQuery)}&utf8=&format=json&srlimit=4`,
+          `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(cleanQuery)}&utf8=&format=json&srlimit=3`,
           {
             signal: controller.signal,
-            headers: { 'User-Agent': 'AbahChatApp/1.0 (free internet search)' },
+            headers: { 'User-Agent': 'AbahChatApp/2.0 (free internet search)' },
           }
         );
         clearTimeout(timeout);
@@ -1248,12 +1673,14 @@ async function searchFreeInternet(query: string): Promise<SearchSource[]> {
             for (const item of searchResults) {
               const title = item.title;
               const url = `https://en.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, '_'))}`;
-              const snippet = sanitizeSnippet(item.snippet);
-              sources.push({
-                title,
-                url,
-                snippet,
-              });
+              const snippet = decodeHtmlEntities(item.snippet);
+              if (title && snippet) {
+                sources.push({
+                  title: `[Wikipedia] ${title}`,
+                  url,
+                  snippet,
+                });
+              }
             }
           }
         }
@@ -1263,15 +1690,15 @@ async function searchFreeInternet(query: string): Promise<SearchSource[]> {
     })()
   );
 
-  // 3. Hacker News Algolia Search API (Real-time tech, developer news, models)
+  // 4. Hacker News Algolia Search API (Real-time tech and discussions)
   tasks.push(
     (async () => {
       try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 4000);
+        const timeout = setTimeout(() => controller.abort(), 3500);
 
         const hnRes = await fetch(
-          `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(cleanQuery)}&tags=story&hitsPerPage=4`,
+          `https://hn.algolia.com/api/v1/search?query=${encodeURIComponent(cleanQuery)}&tags=story&hitsPerPage=3`,
           {
             signal: controller.signal,
           }
@@ -1286,10 +1713,10 @@ async function searchFreeInternet(query: string): Promise<SearchSource[]> {
               const url = hit.url || `https://news.ycombinator.com/item?id=${hit.objectID}`;
               if (title && url) {
                 const snippet = hit.story_text
-                  ? sanitizeSnippet(hit.story_text).slice(0, 200)
-                  : `Hacker News tech community discussion with ${hit.points || 0} points and ${hit.num_comments || 0} comments.`;
+                  ? decodeHtmlEntities(hit.story_text).slice(0, 200)
+                  : `Discussion with ${hit.points || 0} points and ${hit.num_comments || 0} comments on Hacker News.`;
                 sources.push({
-                  title,
+                  title: `[HackerNews] ${title}`,
                   url,
                   snippet,
                 });
@@ -1315,17 +1742,18 @@ async function searchFreeInternet(query: string): Promise<SearchSource[]> {
     }
   }
 
-  return uniqueSources.slice(0, 5);
+  return uniqueSources.slice(0, 6);
 }
 
 // 9. Free Internet Search API endpoint
 app.all('/api/search', async (req, res) => {
   try {
     const query = req.method === 'POST' ? req.body.query : req.query.q;
+    const tz = (req.method === 'POST' ? req.body.timezone : req.query.tz) || 'UTC';
     if (!query || typeof query !== 'string') {
       return res.status(400).json({ error: 'Search query is required' });
     }
-    const results = await searchFreeInternet(query);
+    const results = await searchFreeInternet(query, tz);
     res.json({ query, results, count: results.length });
   } catch (err: any) {
     res.status(500).json({ error: err.message || 'Search failed' });
@@ -1706,12 +2134,26 @@ app.post('/api/shared-chat/import', async (req, res) => {
 // 10. Send chat message with Ollama first, attachments inference, and web search grounding
 app.post('/api/chat', async (req, res) => {
   try {
-    const { message, model = 'gemma2:2b', attachments, webSearch, sharedChat } = req.body;
-    if ((!message || typeof message !== 'string') && (!attachments || attachments.length === 0) && !sharedChat) {
+    const {
+      message,
+      model = 'gemma2:2b',
+      attachments,
+      webSearch,
+      sharedChat,
+      clientTime,
+      clientTimeZone,
+    } = req.body;
+
+    if (
+      (!message || typeof message !== 'string') &&
+      (!attachments || attachments.length === 0) &&
+      !sharedChat
+    ) {
       return res.status(400).json({ error: 'Message, file attachments, or shared chat are required' });
     }
 
-    const effectiveMessage = (message && typeof message === 'string' ? message.trim() : '') ||
+    const effectiveMessage =
+      (message && typeof message === 'string' ? message.trim() : '') ||
       'Please inspect and analyze the attached file(s).';
 
     const state = getMemoryState();
@@ -1801,17 +2243,20 @@ app.post('/api/chat', async (req, res) => {
       }
     }
 
-    // Live Web Search Grounding
+    // Real-Time Temporal Grounding & Live Multi-Engine Search
+    const userTz = clientTimeZone || 'UTC';
+    const temporalInfo = resolveTemporalGrounding(effectiveMessage, userTz);
+
     let searchSources: SearchSource[] = [];
-    if (webSearch) {
+    if (webSearch || temporalInfo.isTimeQuery) {
       try {
-        searchSources = await searchFreeInternet(effectiveMessage);
+        searchSources = await searchFreeInternet(effectiveMessage, userTz);
       } catch (searchErr: any) {
         console.warn('[ABAH CHAT] Web search warning:', searchErr.message);
       }
     }
 
-    // Prepare Model Prompt Augmented with Shared Chat, Attachments & Web Grounding
+    // Prepare Model Prompt Augmented with Shared Chat, Attachments, Temporal Anchor & Web Grounding
     let augmentedUserPrompt = effectiveMessage;
 
     if (activeSharedChat && activeSharedChat.messages.length > 0) {
@@ -1842,8 +2287,22 @@ app.post('/api/chat', async (req, res) => {
             `[Source ${idx + 1}]: ${s.title}\nURL: ${s.url}\nSummary: ${s.snippet}`
         )
         .join('\n\n');
-      augmentedUserPrompt = `[LIVE FREE INTERNET SEARCH RESULTS FOR: "${effectiveMessage}"]\n${sourcesBlock}\n\n[INSTRUCTIONS]: You have live access to the internet. Answer the user's question accurately based on these up-to-date search results and your knowledge. Cite the source titles or URLs when helpful.\n\n[USER QUESTION]:\n${augmentedUserPrompt}`;
+      augmentedUserPrompt = `[LIVE FREE INTERNET SEARCH RESULTS FOR: "${effectiveMessage}"]\n${sourcesBlock}\n\n[INSTRUCTIONS]: You have live access to the internet. Answer the user's question accurately based on these up-to-date search results, verified clock data, and your knowledge. Cite source titles or URLs when helpful.\n\n[USER QUESTION]:\n${augmentedUserPrompt}`;
     }
+
+    const currentDateFormatted = new Intl.DateTimeFormat('en-US', {
+      timeZone: temporalInfo.userTz,
+      dateStyle: 'full',
+    }).format(new Date());
+
+    const temporalAnchor = `[VERIFIED REAL-TIME TEMPORAL GROUNDING]:
+• Today's Date & Day: ${currentDateFormatted} (Current Year: 2026)
+• Current UTC Time: ${temporalInfo.utcStr} (ISO: ${temporalInfo.iso})
+• User Local Time: ${temporalInfo.userStr} (Timezone: ${temporalInfo.userTz})
+${temporalInfo.targetLocation ? `• Target Location Time (${temporalInfo.targetLocation}): ${temporalInfo.targetStr} (Timezone: ${temporalInfo.targetTz})\n` : ''}
+[CRITICAL INSTRUCTION ON TIME/DATE]: Always use this verified real-time temporal anchor for any questions about the current time, date, today, day of the week, or year. Never hallucinate past years or outdated cutoff dates.`;
+
+    augmentedUserPrompt = `${temporalAnchor}\n\n${augmentedUserPrompt}`;
 
     let replyText = '';
     let providerUsed = 'ollama';
@@ -1876,14 +2335,15 @@ app.post('/api/chat', async (req, res) => {
       return parts;
     };
 
+    const companionSystemInstruction = `You are chatter, a personal loyal companion. You answer as concisely, directly, and accurately as possible. You have persistent memory of past conversations, can inspect attached files and code, and have live real-time internet search and world clock grounding. Today is ${currentDateFormatted}, and user local time is ${temporalInfo.userStr} (${temporalInfo.userTz}). Current UTC: ${temporalInfo.utcStr}. The current year is 2026.`;
+
     // If it's an Ollama model (default and primary requirement)
     if (!isExplicitGemini) {
       try {
         const ollamaMessages: any[] = [
           {
             role: 'system',
-            content:
-              'You are chatter, a personal loyal companion. You answer as concisely, directly, and accurately as possible. You have persistent memory of past conversations, can inspect attached files and code, and have live internet search grounding.',
+            content: companionSystemInstruction,
           },
           ...contextHistory.slice(0, -1).map((m) => ({
             role: m.source === 'user' ? 'user' : 'assistant',
@@ -1949,7 +2409,7 @@ app.post('/api/chat', async (req, res) => {
 
             const geminiContents = buildGeminiContents(promptWithContext);
 
-            const generatedText = await generateGeminiResponse(ai, geminiContents);
+            const generatedText = await generateGeminiResponse(ai, geminiContents, companionSystemInstruction);
 
             replyText = generatedText || 'I hear you. How can I assist you further?';
             providerUsed = 'gemini-fallback';
@@ -1963,7 +2423,13 @@ app.post('/api/chat', async (req, res) => {
           const lower = effectiveMessage.toLowerCase();
           const pastMessages = state.llm_context.messages.slice(0, -1);
 
-          if (searchSources.length > 0) {
+          if (temporalInfo.isTimeQuery) {
+            if (temporalInfo.targetLocation) {
+              replyText = `The current time in **${temporalInfo.targetLocation}** is **${temporalInfo.targetStr}** (Timezone: \`${temporalInfo.targetTz}\`).\n\n• **UTC Time**: ${temporalInfo.utcStr}\n• **Your Local Time**: ${temporalInfo.userStr}`;
+            } else {
+              replyText = `The current time is **${temporalInfo.userStr}** (Timezone: \`${temporalInfo.userTz}\`).\n\n• **Date**: ${currentDateFormatted}\n• **UTC Time**: ${temporalInfo.utcStr}`;
+            }
+          } else if (searchSources.length > 0) {
             const listSources = searchSources
               .map((s, i) => `${i + 1}. **${s.title}**: ${s.snippet} ([Link](${s.url}))`)
               .join('\n\n');
@@ -2025,13 +2491,24 @@ app.post('/api/chat', async (req, res) => {
         const geminiContents = buildGeminiContents(promptWithContext);
 
         try {
-          const generated = await generateGeminiResponse(ai, geminiContents);
+          const generated = await generateGeminiResponse(ai, geminiContents, companionSystemInstruction);
           replyText = generated || 'I hear you. How else can I assist you?';
           providerUsed = 'gemini';
         } catch (genErr: any) {
           console.error('[ABAH CHAT] Gemini generation failed:', genErr?.message || genErr);
           
-          if (activeSharedChat && activeSharedChat.messages.length > 0) {
+          if (temporalInfo.isTimeQuery) {
+            if (temporalInfo.targetLocation) {
+              replyText = `The current time in **${temporalInfo.targetLocation}** is **${temporalInfo.targetStr}** (Timezone: \`${temporalInfo.targetTz}\`).\n\n• **UTC Time**: ${temporalInfo.utcStr}\n• **Your Local Time**: ${temporalInfo.userStr}`;
+            } else {
+              replyText = `The current time is **${temporalInfo.userStr}** (Timezone: \`${temporalInfo.userTz}\`).\n\n• **Date**: ${currentDateFormatted}\n• **UTC Time**: ${temporalInfo.utcStr}`;
+            }
+          } else if (searchSources.length > 0) {
+            const listSources = searchSources
+              .map((s, i) => `${i + 1}. **${s.title}**: ${s.snippet} ([Link](${s.url}))`)
+              .join('\n\n');
+            replyText = `Here is what I found on the internet for **"${effectiveMessage}"**:\n\n${listSources}\n\n*(Grounded via live free internet search and persistent memory.)*`;
+          } else if (activeSharedChat && activeSharedChat.messages.length > 0) {
             const lastTurns = activeSharedChat.messages.slice(-4);
             const turnsList = lastTurns
               .map(
