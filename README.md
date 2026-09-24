@@ -21,7 +21,6 @@ A private, local-first personal AI companion and Ollama management center. Featu
 - [Live Web Search Grounding](#-live-web-search-grounding)
 - [Multimodal File Attachments](#-multimodal-file-attachments)
 - [Persistent Memory Engine](#-persistent-memory-engine)
-- [API Architecture](#-api-architecture)
 - [Credits & Contacts](#-credits--contacts)
 - [Buy Me a Coffee](#-buy-me-a-coffee)
 
@@ -153,24 +152,6 @@ Conversation history is automatically persisted to `memory.json` using the struc
 ```
 
 Use the **Memory** inspector button in the top navigation to view the live state, copy the JSON, download a backup, or clear the history.
-
----
-
-## 📡 API Architecture
-
-| Endpoint | Method | Description |
-| :--- | :--- | :--- |
-| `/api/health` | `GET` | Health check endpoint |
-| `/api/ollama/status` | `GET` | Check Ollama connectivity and status |
-| `/api/ollama/models` | `GET` | List locally pulled models |
-| `/api/ollama/library` | `GET` | Search and list available models from Ollama library |
-| `/api/ollama/pull` | `POST` | Pull a model with SSE stream progress |
-| `/api/ollama/delete` | `DELETE` | Delete a local model |
-| `/api/chat` | `POST` | Send chat prompt to active model with stream support |
-| `/api/memory` | `GET` / `POST` / `DELETE` | Retrieve, update, or clear `memory.json` |
-| `/api/search` | `POST` | Execute live internet search query |
-| `/api/shared-chat/fetch` | `POST` | Parse and extract conversation from shared ChatGPT links |
-| `/api/shared-chat/parse-text` | `POST` | Parse raw dialogue transcript or JSON |
 
 ---
 
