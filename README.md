@@ -88,12 +88,6 @@ Traditional local LLM interfaces lose session state when a browser tab closes or
    ```
    Open your browser to `http://localhost:3000`.
 
-4. **Build and run for production**:
-   ```bash
-   npm run build
-   npm start
-   ```
-
 ---
 
 ## 🔄 Ollama Model Hub & Management
