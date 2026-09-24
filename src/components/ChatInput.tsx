@@ -55,12 +55,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
-  // Check if current text contains an OpenAI, Claude, or Perplexity share link
+  // Check if current text contains an OpenAI share link
   const detectedSharedUrlMatch =
-    text.match(/https?:\/\/(?:www\.)?(?:chatgpt\.com|chat\.openai\.com)\/share\/[a-zA-Z0-9_-]+/i) ||
-    text.match(/https?:\/\/(?:www\.)?claude\.ai\/share\/[a-zA-Z0-9_-]+/i) ||
-    text.match(/https?:\/\/(?:www\.)?claude\.site\/[a-zA-Z0-9_-]+/i) ||
-    text.match(/https?:\/\/(?:www\.)?perplexity\.ai\/search\/[a-zA-Z0-9._-]+/i);
+    text.match(/https?:\/\/(?:www\.)?(?:chatgpt\.com|chat\.openai\.com)\/share\/[a-zA-Z0-9_-]+/i);
   const detectedUrl = detectedSharedUrlMatch ? detectedSharedUrlMatch[0] : null;
 
   const processFile = async (file: File): Promise<ChatAttachment> => {
@@ -352,7 +349,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                 <span className="hidden sm:inline">Attach File</span>
               </button>
 
-              {/* Shared Chat Link (OpenAI / Claude) Button */}
+              {/* Shared Chat Link (OpenAI) Button */}
               <button
                 type="button"
                 id="open-shared-chat-btn"
@@ -363,7 +360,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                     ? 'bg-blue-950/60 text-blue-300 border border-blue-700/60 shadow-sm shadow-blue-950/50'
                     : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900 border border-transparent hover:border-zinc-800'
                 }`}
-                title="Read, inspect, or infer on OpenAI ChatGPT or Anthropic Claude shared link"
+                title="Read, inspect, or infer on OpenAI ChatGPT shared link"
               >
                 <Link2 className={`w-3.5 h-3.5 ${sharedChat ? 'text-blue-300' : 'text-blue-400'}`} />
                 <span className="hidden sm:inline">Shared Chat</span>
@@ -435,7 +432,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({
                 <span>Internet Grounding Active</span>
               </span>
             )}
-            <span>Paste ChatGPT/Claude link or drag files &bull; Enter to send</span>
+            <span>Paste ChatGPT link or drag files &bull; Enter to send</span>
           </span>
           <span className="flex items-center gap-1">
             <Sparkles className="w-3 h-3 text-amber-400" />

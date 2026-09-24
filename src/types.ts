@@ -134,7 +134,7 @@ export interface SharedChatMessage {
 
 export interface SharedChatConversation {
   url: string;
-  provider: 'OpenAI ChatGPT' | 'Anthropic Claude' | 'Shared AI Chat';
+  provider: 'OpenAI ChatGPT' | 'Shared AI Chat';
   title: string;
   sharedId?: string;
   messages: SharedChatMessage[];

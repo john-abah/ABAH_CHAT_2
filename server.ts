@@ -1863,14 +1863,11 @@ app.all('/api/search', async (req, res) => {
   }
 });
 
-// 9.5 Shared Chat Parser for OpenAI ChatGPT, Anthropic Claude, Perplexity, and others
+// 9.5 Shared Chat Parser for OpenAI ChatGPT and transcripts
 function extractSharedChatUrl(text: string): string | null {
   if (!text) return null;
   const match =
     text.match(/https?:\/\/(?:www\.)?(?:chatgpt\.com|chat\.openai\.com)\/share(?:\/e)?\/[a-zA-Z0-9_-]+/i) ||
-    text.match(/https?:\/\/(?:www\.)?claude\.ai\/share\/[a-zA-Z0-9_-]+/i) ||
-    text.match(/https?:\/\/(?:www\.)?claude\.site\/[a-zA-Z0-9_-]+/i) ||
-    text.match(/https?:\/\/(?:www\.)?perplexity\.ai\/(?:page|search)\/[a-zA-Z0-9_-]+/i) ||
     text.match(/https?:\/\/v0\.dev\/chat\/[a-zA-Z0-9_-]+/i);
   return match ? match[0] : null;
 }
@@ -2060,140 +2057,6 @@ function parseChatGPTShareHtml(html: string, url: string): SharedChatConversatio
   };
 }
 
-function parseClaudeShareHtml(html: string, url: string): SharedChatConversation {
-  let title = 'Shared Claude Conversation';
-  const titleMatch =
-    html.match(/<title>Claude\s*-\s*([^<]+)<\/title>/i) ||
-    html.match(/<title>([^<]+)\s*-\s*Claude<\/title>/i) ||
-    html.match(/<title>([^<]+)<\/title>/i);
-  if (titleMatch) {
-    title = titleMatch[1].replace(/\s*-\s*Claude$/i, '').trim();
-  }
-
-  const sharedIdMatch = url.match(/\/share\/([a-zA-Z0-9_-]+)/i) || url.match(/claude\.site\/([a-zA-Z0-9_-]+)/i);
-  const sharedId = sharedIdMatch ? sharedIdMatch[1] : undefined;
-
-  const scripts = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi)];
-  const messages: SharedChatMessage[] = [];
-
-  // 1. Next.js __NEXT_DATA__
-  for (const s of scripts) {
-    if (s[0].includes('__NEXT_DATA__') || s[1].includes('"chat_messages"')) {
-      try {
-        const data = JSON.parse(s[1]);
-        const conversation =
-          data.props?.pageProps?.sharedConversation ||
-          data.props?.pageProps?.conversation ||
-          data;
-
-        const chatMessages = conversation.chat_messages || conversation.messages || [];
-        if (Array.isArray(chatMessages) && chatMessages.length > 0) {
-          for (let idx = 0; idx < chatMessages.length; idx++) {
-            const m = chatMessages[idx];
-            const role = m.sender === 'human' || m.role === 'user' ? 'user' : 'assistant';
-            const text =
-              m.text ||
-              (Array.isArray(m.content)
-                ? m.content.map((c: any) => c.text || '').join('\n')
-                : typeof m.content === 'string'
-                ? m.content
-                : '');
-            if (text && text.trim()) {
-              messages.push({
-                id: m.uuid || m.id || `claude-msg-${idx}`,
-                role,
-                content: text.trim(),
-                timestamp: m.created_at || m.updated_at,
-              });
-            }
-          }
-          if (conversation.name || conversation.title) {
-            title = conversation.name || conversation.title;
-          }
-        }
-      } catch {}
-    }
-  }
-
-  // 2. Claude HTML fallback parsing
-  if (messages.length === 0) {
-    const turnBlocks = [
-      ...html.matchAll(
-        /<(?:div|article)[^>]*(?:data-testid="[^"]*(?:message|turn)[^"]*"|class="[^"]*(?:font-claude-message|human-message)[^"]*")[^>]*>([\s\S]*?)<\/(?:div|article)>/gi
-      ),
-    ];
-    for (const block of turnBlocks) {
-      const isHuman = block[0].includes('human') || block[0].includes('user');
-      const cleanText = decodeHtmlEntities(block[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
-      if (cleanText.length > 5) {
-        messages.push({
-          id: `turn-${messages.length}`,
-          role: isHuman ? 'user' : 'assistant',
-          content: cleanText,
-        });
-      }
-    }
-  }
-
-  return {
-    url,
-    provider: 'Anthropic Claude',
-    title,
-    sharedId,
-    messages,
-    turnCount: messages.length,
-    summary:
-      messages.length > 0
-        ? `${messages.length} conversational turns extracted from Claude share`
-        : 'Unable to extract messages automatically from this link.',
-    fetchedAt: new Date().toISOString(),
-  };
-}
-
-function parsePerplexityShareHtml(html: string, url: string): SharedChatConversation {
-  let title = 'Shared Perplexity Search';
-  const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
-  if (titleMatch) {
-    title = titleMatch[1].replace(/\s*-\s*Perplexity$/i, '').trim();
-  }
-
-  const messages: SharedChatMessage[] = [];
-  const queryMatch = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
-  if (queryMatch) {
-    const userQuery = decodeHtmlEntities(queryMatch[1].replace(/<[^>]+>/g, ' ').trim());
-    if (userQuery) {
-      messages.push({
-        id: 'perp-q',
-        role: 'user',
-        content: userQuery,
-      });
-    }
-  }
-
-  // Answer text
-  const answerMatch = html.match(/<div[^>]*class="[^"]*prose[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
-  if (answerMatch) {
-    const cleanAnswer = decodeHtmlEntities(answerMatch[1].replace(/<[^>]+>/g, ' ').trim());
-    if (cleanAnswer) {
-      messages.push({
-        id: 'perp-a',
-        role: 'assistant',
-        content: cleanAnswer,
-      });
-    }
-  }
-
-  return {
-    url,
-    provider: 'Perplexity AI',
-    title,
-    messages,
-    turnCount: messages.length,
-    summary: `${messages.length} turns extracted from Perplexity share`,
-    fetchedAt: new Date().toISOString(),
-  };
-}
-
 // Universal parser for pasted text or JSON transcript
 function parseSharedChatFromText(rawText: string, customTitle?: string): SharedChatConversation {
   const text = rawText.trim();
@@ -2244,7 +2107,7 @@ function parseSharedChatFromText(rawText: string, customTitle?: string): SharedC
     let currentRole: 'user' | 'assistant' = 'user';
     let currentContent: string[] = [];
 
-    const labelRegex = /^(?:\[?(User|Human|You|Question)\]?[:：]|\[?(Assistant|ChatGPT|Claude|Perplexity|Gemini|Answer|Bot)\]?[:：])\s*(.*)$/i;
+    const labelRegex = /^(?:\[?(User|Human|You|Question)\]?[:：]|\[?(Assistant|ChatGPT|Gemini|Answer|Bot)\]?[:：])\s*(.*)$/i;
 
     for (const line of lines) {
       const match = line.match(labelRegex);
@@ -2304,9 +2167,7 @@ function parseSharedChatFromText(rawText: string, customTitle?: string): SharedC
 
 async function fetchAndParseSharedChat(targetUrl: string): Promise<SharedChatConversation> {
   const cleanUrl = targetUrl.trim();
-  const isClaude = cleanUrl.includes('claude.ai') || cleanUrl.includes('claude.site');
   const isOpenAI = cleanUrl.includes('chatgpt.com') || cleanUrl.includes('chat.openai.com');
-  const isPerplexity = cleanUrl.includes('perplexity.ai');
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 12000);
@@ -2330,19 +2191,7 @@ async function fetchAndParseSharedChat(targetUrl: string): Promise<SharedChatCon
 
   const html = await res.text();
 
-  if (isOpenAI) {
-    return parseChatGPTShareHtml(html, cleanUrl);
-  } else if (isClaude) {
-    return parseClaudeShareHtml(html, cleanUrl);
-  } else if (isPerplexity) {
-    return parsePerplexityShareHtml(html, cleanUrl);
-  } else {
-    const openAiAttempt = parseChatGPTShareHtml(html, cleanUrl);
-    if (openAiAttempt.messages.length > 0) return openAiAttempt;
-    const claudeAttempt = parseClaudeShareHtml(html, cleanUrl);
-    if (claudeAttempt.messages.length > 0) return claudeAttempt;
-    return parsePerplexityShareHtml(html, cleanUrl);
-  }
+  return parseChatGPTShareHtml(html, cleanUrl);
 }
 
 // 9.6 Shared Chat Ingestion Endpoints

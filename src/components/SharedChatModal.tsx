@@ -46,7 +46,7 @@ export const SharedChatModal: React.FC<SharedChatModalProps> = ({
   const handleFetchUrl = async () => {
     const fetchUrl = url.trim();
     if (!fetchUrl) {
-      setError('Please enter a valid shared chat link (ChatGPT, Claude, Perplexity, etc.).');
+      setError('Please enter a valid ChatGPT shared chat link.');
       return;
     }
 
@@ -184,7 +184,7 @@ export const SharedChatModal: React.FC<SharedChatModalProps> = ({
                 </span>
               </h2>
               <p className="text-xs text-zinc-400">
-                Inspect, quote, infer, or import conversations from ChatGPT, Claude, Perplexity, or pasted transcripts
+                Inspect, quote, infer, or import conversations from ChatGPT or pasted transcripts
               </p>
             </div>
           </div>
@@ -227,7 +227,7 @@ export const SharedChatModal: React.FC<SharedChatModalProps> = ({
               </button>
             </div>
             <span className="text-[11px] text-zinc-500 font-mono hidden sm:inline">
-              ChatGPT &bull; Claude &bull; Perplexity &bull; Text
+              ChatGPT &bull; Text
             </span>
           </div>
 
@@ -248,7 +248,7 @@ export const SharedChatModal: React.FC<SharedChatModalProps> = ({
                         handleFetchUrl();
                       }
                     }}
-                    placeholder="Paste shared link (e.g. chatgpt.com/share/..., claude.ai/share/..., perplexity.ai/...)"
+                    placeholder="Paste shared link (e.g. chatgpt.com/share/...)"
                     className="w-full bg-zinc-900 border border-zinc-700/80 rounded-xl pl-9 pr-3 py-2 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-blue-500/80 focus:ring-1 focus:ring-blue-500/40 font-mono"
                   />
                 </div>
@@ -484,7 +484,7 @@ export const SharedChatModal: React.FC<SharedChatModalProps> = ({
               <Link2 className="w-8 h-8 text-zinc-600 mb-1" />
               <p className="text-sm font-medium text-zinc-400">No conversation loaded yet</p>
               <p className="text-xs text-zinc-500 max-w-sm">
-                Paste any shared chat link from ChatGPT or Claude above to extract its conversation
+                Paste any shared chat link from ChatGPT above to extract its conversation
                 dialogue and let ABAH CHAT infer on it.
               </p>
             </div>
@@ -500,7 +500,7 @@ export const SharedChatModal: React.FC<SharedChatModalProps> = ({
                 <span>Ready to infer or import into persistent memory</span>
               </span>
             ) : (
-              <span>Tip: Paste any shared chat URL from ChatGPT, Claude, Perplexity, or paste raw transcript text</span>
+              <span>Tip: Paste any shared chat URL from ChatGPT or paste raw transcript text</span>
             )}
           </span>
           <button

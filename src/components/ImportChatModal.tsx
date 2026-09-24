@@ -47,7 +47,7 @@ export const ImportChatModal: React.FC<ImportChatModalProps> = ({
   const handleFetchSharedUrl = async (customUrl?: string) => {
     const target = (customUrl || sharedUrl).trim();
     if (!target) {
-      setParseError('Please enter an OpenAI or Claude share link.');
+      setParseError('Please enter a valid OpenAI ChatGPT share link.');
       return;
     }
 
@@ -333,7 +333,7 @@ export const ImportChatModal: React.FC<ImportChatModalProps> = ({
             }`}
           >
             <Link2 className="w-3.5 h-3.5 text-blue-400" />
-            Shared AI Link (ChatGPT / Claude)
+            Shared AI Link (ChatGPT)
           </button>
         </div>
 
@@ -395,7 +395,7 @@ export const ImportChatModal: React.FC<ImportChatModalProps> = ({
           ) : (
             <div className="space-y-3">
               <label className="text-xs font-medium text-zinc-300 flex items-center justify-between">
-                <span>Enter OpenAI or Claude Shared Chat URL</span>
+                <span>Enter OpenAI Shared Chat URL</span>
                 <span className="text-blue-400 text-[11px]">Public shared link</span>
               </label>
               <div className="flex gap-2">
@@ -409,7 +409,7 @@ export const ImportChatModal: React.FC<ImportChatModalProps> = ({
                       handleFetchSharedUrl();
                     }
                   }}
-                  placeholder="https://chatgpt.com/share/... or https://claude.ai/share/..."
+                  placeholder="https://chatgpt.com/share/..."
                   className="w-full bg-zinc-950 border border-zinc-800 focus:border-blue-500 rounded-xl px-3 py-2 text-xs font-mono text-zinc-200 placeholder-zinc-600 focus:outline-none"
                 />
                 <button
@@ -434,7 +434,7 @@ export const ImportChatModal: React.FC<ImportChatModalProps> = ({
                   <span>Directly inlines dialogue turns into persistent memory</span>
                 </span>
                 <span className="text-zinc-500 font-mono text-[10px]">
-                  ChatGPT &bull; Claude &bull; Perplexity
+                  ChatGPT
                 </span>
               </div>
             </div>
