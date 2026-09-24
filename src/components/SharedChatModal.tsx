@@ -31,22 +31,22 @@ export const SharedChatModal: React.FC<SharedChatModalProps> = ({
   onImportToMemory,
   onDirectInfer,
 }) => {
+  const [inputMode, setInputMode] = useState<'url' | 'text'>('url');
   const [url, setUrl] = useState('');
+  const [pastedText, setPastedText] = useState('');
+  const [pastedTitle, setPastedTitle] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [conversation, setConversation] = useState<SharedChatConversation | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'preview' | 'info'>('preview');
   const [isImporting, setIsImporting] = useState(false);
   const [importSuccess, setImportSuccess] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
-  const SAMPLE_LINK = 'https://chatgpt.com/share/6ab2387e-4aa0-83eb-b566-41c2a6696548';
-
-  const handleFetch = async (targetUrl?: string) => {
-    const fetchUrl = (targetUrl || url).trim();
+  const handleFetchUrl = async () => {
+    const fetchUrl = url.trim();
     if (!fetchUrl) {
-      setError('Please enter a valid OpenAI ChatGPT or Anthropic Claude share link.');
+      setError('Please enter a valid shared chat link (ChatGPT, Claude, Perplexity, etc.).');
       return;
     }
 
@@ -67,8 +67,8 @@ export const SharedChatModal: React.FC<SharedChatModalProps> = ({
       }
 
       const data = await res.json();
-      if (!data.conversation || !data.conversation.messages) {
-        throw new Error('No conversation data could be parsed from this URL.');
+      if (!data.conversation || !Array.isArray(data.conversation.messages) || data.conversation.messages.length === 0) {
+        throw new Error('No conversational turns could be extracted from this URL. If the page is private or protected, switch to the "Paste Transcript" tab above to paste the conversation directly.');
       }
 
       setConversation(data.conversation);
@@ -76,8 +76,44 @@ export const SharedChatModal: React.FC<SharedChatModalProps> = ({
       console.error('Error fetching shared chat:', err);
       setError(
         err.message ||
-          'Failed to extract conversation. Please verify the link is public and accessible.'
+          'Failed to extract conversation. If the link is protected, try pasting the transcript text directly.'
       );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleParseText = async () => {
+    const raw = pastedText.trim();
+    if (!raw) {
+      setError('Please paste conversation text, dialogue transcript, or JSON export.');
+      return;
+    }
+
+    setError(null);
+    setImportSuccess(null);
+    setIsLoading(true);
+
+    try {
+      const res = await fetch('/api/shared-chat/parse-text', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: raw, title: pastedTitle.trim() || undefined }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || `Parse failed (Status ${res.status})`);
+      }
+
+      const data = await res.json();
+      if (!data.conversation || !Array.isArray(data.conversation.messages) || data.conversation.messages.length === 0) {
+        throw new Error('No conversational messages were detected in the pasted text.');
+      }
+
+      setConversation(data.conversation);
+    } catch (err: any) {
+      setError(err.message || 'Failed to parse conversation text.');
     } finally {
       setIsLoading(false);
     }
@@ -144,11 +180,11 @@ export const SharedChatModal: React.FC<SharedChatModalProps> = ({
               <h2 className="text-sm font-semibold text-zinc-100 flex items-center gap-2">
                 <span>Read & Infer on Shared AI Chat</span>
                 <span className="text-[10px] bg-indigo-500/20 text-indigo-300 px-2 py-0.5 rounded-full border border-indigo-500/30">
-                  OpenAI &bull; Claude
+                  Universal Shared Chat
                 </span>
               </h2>
               <p className="text-xs text-zinc-400">
-                Paste a shared conversation link to inspect, quote, infer, or import into ABAH CHAT
+                Inspect, quote, infer, or import conversations from ChatGPT, Claude, Perplexity, or pasted transcripts
               </p>
             </div>
           </div>
@@ -161,71 +197,130 @@ export const SharedChatModal: React.FC<SharedChatModalProps> = ({
           </button>
         </div>
 
-        {/* URL Input Bar */}
+        {/* Input Bar with Mode Switcher */}
         <div className="p-6 border-b border-zinc-800/80 bg-zinc-950/40 space-y-3">
-          <div className="flex flex-col sm:flex-row gap-2">
-            <div className="relative flex-1">
-              <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-zinc-500">
-                <Link2 className="w-4 h-4" />
-              </div>
-              <input
-                type="url"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    handleFetch();
-                  }
-                }}
-                placeholder="Paste OpenAI (chatgpt.com/share/...) or Claude (claude.ai/share/...) link..."
-                className="w-full bg-zinc-900 border border-zinc-700/80 rounded-xl pl-9 pr-3 py-2 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-blue-500/80 focus:ring-1 focus:ring-blue-500/40 font-mono"
-              />
+          <div className="flex items-center justify-between pb-1">
+            <div className="flex items-center gap-2 bg-zinc-900 p-1 rounded-xl border border-zinc-800 text-xs">
+              <button
+                type="button"
+                onClick={() => setInputMode('url')}
+                className={`px-3 py-1 rounded-lg transition-all font-medium flex items-center gap-1.5 ${
+                  inputMode === 'url'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                <Link2 className="w-3.5 h-3.5" />
+                <span>Share Link URL</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setInputMode('text')}
+                className={`px-3 py-1 rounded-lg transition-all font-medium flex items-center gap-1.5 ${
+                  inputMode === 'text'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Paste Transcript / Text</span>
+              </button>
             </div>
-            <button
-              id="fetch-shared-chat-btn"
-              onClick={() => handleFetch()}
-              disabled={isLoading || !url.trim()}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:pointer-events-none text-white text-xs font-medium rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-sm shadow-blue-600/20 shrink-0"
-            >
-              {isLoading ? (
-                <>
-                  <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                  <span>Extracting...</span>
-                </>
-              ) : (
-                <>
-                  <span>Fetch & Read Chat</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </>
-              )}
-            </button>
+            <span className="text-[11px] text-zinc-500 font-mono hidden sm:inline">
+              ChatGPT &bull; Claude &bull; Perplexity &bull; Text
+            </span>
           </div>
 
-          {/* Quick link suggestion */}
-          <div className="flex items-center justify-between text-xs text-zinc-400">
-            <span className="flex items-center gap-1.5 text-[11px]">
-              <Sparkles className="w-3 h-3 text-amber-400" />
-              <span>Supports ChatGPT shared links and Claude shared links</span>
-            </span>
-            <button
-              type="button"
-              onClick={() => {
-                setUrl(SAMPLE_LINK);
-                handleFetch(SAMPLE_LINK);
-              }}
-              className="text-[11px] text-blue-400 hover:text-blue-300 underline underline-offset-2 flex items-center gap-1"
-            >
-              <span>Load sample: Wohnungsanfrage (66 turns)</span>
-            </button>
-          </div>
+          {inputMode === 'url' ? (
+            <div className="space-y-2">
+              <div className="flex flex-col sm:flex-row gap-2">
+                <div className="relative flex-1">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-zinc-500">
+                    <Link2 className="w-4 h-4" />
+                  </div>
+                  <input
+                    type="url"
+                    value={url}
+                    onChange={(e) => setUrl(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleFetchUrl();
+                      }
+                    }}
+                    placeholder="Paste shared link (e.g. chatgpt.com/share/..., claude.ai/share/..., perplexity.ai/...)"
+                    className="w-full bg-zinc-900 border border-zinc-700/80 rounded-xl pl-9 pr-3 py-2 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-blue-500/80 focus:ring-1 focus:ring-blue-500/40 font-mono"
+                  />
+                </div>
+                <button
+                  id="fetch-shared-chat-btn"
+                  onClick={handleFetchUrl}
+                  disabled={isLoading || !url.trim()}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:pointer-events-none text-white text-xs font-medium rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-sm shadow-blue-600/20 shrink-0"
+                >
+                  {isLoading ? (
+                    <>
+                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <span>Extracting...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Fetch & Read Chat</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </>
+                  )}
+                </button>
+              </div>
+              <div className="text-[11px] text-zinc-500 flex items-center gap-1.5">
+                <Sparkles className="w-3 h-3 text-amber-400" />
+                <span>Works with any shared chat link. If a website protects the page with captcha, switch to "Paste Transcript".</span>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <input
+                type="text"
+                value={pastedTitle}
+                onChange={(e) => setPastedTitle(e.target.value)}
+                placeholder="Optional conversation title..."
+                className="w-full bg-zinc-900 border border-zinc-700/80 rounded-xl px-3 py-1.5 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-blue-500/80 focus:ring-1 focus:ring-blue-500/40"
+              />
+              <textarea
+                value={pastedText}
+                onChange={(e) => setPastedText(e.target.value)}
+                rows={4}
+                placeholder="Paste conversation transcript text or JSON export here (e.g. 'User: ... Assistant: ...')"
+                className="w-full bg-zinc-900 border border-zinc-700/80 rounded-xl p-3 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-blue-500/80 focus:ring-1 focus:ring-blue-500/40 font-mono resize-none"
+              />
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={handleParseText}
+                  disabled={isLoading || !pastedText.trim()}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:pointer-events-none text-white text-xs font-medium rounded-xl flex items-center justify-center gap-1.5 transition-all shadow-sm shadow-blue-600/20"
+                >
+                  {isLoading ? (
+                    <>
+                      <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <span>Parsing...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>Parse Conversation</span>
+                      <ArrowRight className="w-3.5 h-3.5" />
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Error Message */}
           {error && (
             <div className="bg-red-950/40 border border-red-800/60 rounded-xl p-3 flex items-start gap-2.5 text-xs text-red-300 animate-in fade-in">
               <AlertCircle className="w-4 h-4 shrink-0 text-red-400 mt-0.5" />
               <div>
-                <span className="font-semibold">Extraction notice: </span>
+                <span className="font-semibold">Notice: </span>
                 <span>{error}</span>
               </div>
             </div>
@@ -405,7 +500,7 @@ export const SharedChatModal: React.FC<SharedChatModalProps> = ({
                 <span>Ready to infer or import into persistent memory</span>
               </span>
             ) : (
-              <span>Tip: Click "Load sample" to instantly try with John Abah's ChatGPT share</span>
+              <span>Tip: Paste any shared chat URL from ChatGPT, Claude, Perplexity, or paste raw transcript text</span>
             )}
           </span>
           <button

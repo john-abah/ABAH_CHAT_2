@@ -27,36 +27,22 @@ let currentOllamaBaseUrl = process.env.OLLAMA_BASE_URL || 'http://localhost:1143
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
-// Persistent Pulled Models Storage
-const DEFAULT_INITIAL_PULLED: PulledOllamaModel[] = [
-  {
-    id: 'gemma2:2b',
-    name: 'Gemma 2 2B',
-    baseModelId: 'gemma2',
-    tag: '2b',
-    parameterSize: '2.6B',
-    size: '1.6 GB',
-    description: "Google's ultra-efficient 2B model. Default model profile in original ABAH_CHAT companion.",
-    pulledAt: new Date().toISOString(),
-    status: 'ready',
-    progress: 100,
-  },
-];
+// Persistent Pulled Models Storage - No hardcoded default model seeded
+const DEFAULT_INITIAL_PULLED: PulledOllamaModel[] = [];
 
 function getPulledModels(): PulledOllamaModel[] {
   try {
     if (fs.existsSync(PULLED_MODELS_FILE)) {
       const raw = fs.readFileSync(PULLED_MODELS_FILE, 'utf-8');
       const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
+      if (Array.isArray(parsed)) {
         return parsed;
       }
     }
   } catch (err) {
     console.error('Error reading pulled_models.json:', err);
   }
-  savePulledModels(DEFAULT_INITIAL_PULLED);
-  return DEFAULT_INITIAL_PULLED;
+  return [];
 }
 
 function savePulledModels(models: PulledOllamaModel[]): void {
@@ -442,6 +428,28 @@ async function fetchOllamaTags(baseUrl: string): Promise<{
   }
 }
 
+// Ollama Daemon State Tracker
+interface OllamaDaemonState {
+  status: 'idle' | 'checking' | 'downloading' | 'starting' | 'running' | 'error';
+  message: string;
+  version: string | null;
+  host: string;
+  installed: boolean;
+  isDownloading: boolean;
+  isStarting: boolean;
+  error?: string;
+}
+
+const ollamaDaemonState: OllamaDaemonState = {
+  status: 'idle',
+  message: 'Initializing Ollama environment check...',
+  version: null,
+  host: currentOllamaBaseUrl,
+  installed: false,
+  isDownloading: false,
+  isStarting: false,
+};
+
 // Helper to find Ollama binary in standard paths
 function findOllamaBinary(): string | null {
   const candidates = [
@@ -462,49 +470,133 @@ function findOllamaBinary(): string | null {
   return null;
 }
 
-// Automatically start Ollama daemon if installed and not running
-async function ensureOllamaDaemon(): Promise<boolean> {
+let isEnsuringOllama = false;
+
+// Ensure Ollama either downloads if not present or starts if present on startup
+async function ensureOllamaInstalledAndRunning(): Promise<boolean> {
+  if (isEnsuringOllama) return false;
+  isEnsuringOllama = true;
+
   try {
-    const probe = await fetch(`${currentOllamaBaseUrl}/api/version`);
-    if (probe.ok) {
-      return true; // Already running
+    ollamaDaemonState.status = 'checking';
+    ollamaDaemonState.message = 'Verifying Ollama service connection...';
+
+    // 1. Probe if Ollama is already running and reachable
+    try {
+      const probe = await fetch(`${currentOllamaBaseUrl}/api/version`);
+      if (probe.ok) {
+        const data = (await probe.json()) as { version?: string };
+        ollamaDaemonState.status = 'running';
+        ollamaDaemonState.installed = true;
+        ollamaDaemonState.version = data.version || 'active';
+        ollamaDaemonState.message = `Ollama service active (v${data.version || 'running'})`;
+        ollamaDaemonState.isDownloading = false;
+        ollamaDaemonState.isStarting = false;
+        return true;
+      }
+    } catch {
+      // Not currently responding
     }
-  } catch {
-    // Not responding, try to start
-  }
 
-  const bin = findOllamaBinary();
-  if (!bin) {
-    console.log('[ABAH CHAT] Ollama binary not found in system paths. Auto-install available.');
-    return false;
-  }
+    // 2. Check if binary is present on system
+    let bin = findOllamaBinary();
+    ollamaDaemonState.installed = Boolean(bin);
 
-  console.log(`[ABAH CHAT] Automatically starting Ollama daemon via ${bin}...`);
-  try {
-    const child = spawn(bin, ['serve'], {
-      detached: true,
-      stdio: 'ignore',
-      env: { ...process.env, OLLAMA_HOST: '0.0.0.0' },
-    });
-    child.unref();
+    if (!bin) {
+      // 3. Binary not found: Download and install Ollama automatically
+      console.log('[ABAH CHAT] Ollama binary not found. Initiating automated background install...');
+      ollamaDaemonState.status = 'downloading';
+      ollamaDaemonState.isDownloading = true;
+      ollamaDaemonState.message = 'Ollama not detected. Downloading and installing Ollama in background...';
 
-    // Give daemon up to 3 seconds to respond
-    for (let i = 0; i < 6; i++) {
-      await new Promise((r) => setTimeout(r, 500));
       try {
-        const probe = await fetch(`${currentOllamaBaseUrl}/api/version`);
-        if (probe.ok) {
-          console.log('[ABAH CHAT] Ollama daemon successfully started and responding.');
-          return true;
+        // Ensure zstd compression package is installed on Debian/Ubuntu environments
+        try {
+          execSync('which zstd || (which apt-get && apt-get update && apt-get install -y zstd)', { stdio: 'ignore' });
+        } catch (zstdErr: any) {
+          console.warn('[ABAH CHAT] zstd prerequisite warning:', zstdErr.message);
         }
-      } catch {
-        // retry
+
+        await new Promise<void>((resolve, reject) => {
+          exec('curl -fsSL https://ollama.com/install.sh | sh', { timeout: 300000 }, (err, stdout, stderr) => {
+            if (err) {
+              console.error('[ABAH CHAT] Ollama auto-download failed:', stderr || err.message);
+              reject(err);
+            } else {
+              console.log('[ABAH CHAT] Ollama download and installation completed successfully.');
+              resolve();
+            }
+          });
+        });
+
+        bin = findOllamaBinary();
+        ollamaDaemonState.installed = Boolean(bin);
+        ollamaDaemonState.isDownloading = false;
+      } catch (dlErr: any) {
+        console.warn('[ABAH CHAT] Ollama automatic download notice:', dlErr.message);
+        ollamaDaemonState.status = 'error';
+        ollamaDaemonState.isDownloading = false;
+        ollamaDaemonState.error = dlErr.message;
+        ollamaDaemonState.message = 'Ollama auto-download could not finish. You can configure a remote host in Settings.';
+        return false;
       }
     }
-  } catch (err: any) {
-    console.error('[ABAH CHAT] Error launching Ollama daemon:', err.message);
+
+    if (!bin) {
+      ollamaDaemonState.status = 'error';
+      ollamaDaemonState.message = 'Ollama binary was not found after installation attempt.';
+      return false;
+    }
+
+    // 4. Ollama binary is present: Start the local daemon
+    console.log(`[ABAH CHAT] Starting Ollama daemon via ${bin}...`);
+    ollamaDaemonState.status = 'starting';
+    ollamaDaemonState.isStarting = true;
+    ollamaDaemonState.message = 'Starting local Ollama daemon service...';
+
+    try {
+      const child = spawn(bin, ['serve'], {
+        detached: true,
+        stdio: 'ignore',
+        env: { ...process.env, OLLAMA_HOST: '0.0.0.0:11434', OLLAMA_ORIGINS: '*' },
+      });
+      child.unref();
+
+      // Poll until Ollama API responds (up to 15 seconds)
+      for (let i = 0; i < 25; i++) {
+        await new Promise((r) => setTimeout(r, 600));
+        try {
+          const probe = await fetch(`${currentOllamaBaseUrl}/api/version`);
+          if (probe.ok) {
+            const data = (await probe.json()) as { version?: string };
+            ollamaDaemonState.status = 'running';
+            ollamaDaemonState.installed = true;
+            ollamaDaemonState.isStarting = false;
+            ollamaDaemonState.version = data.version || 'active';
+            ollamaDaemonState.message = `Ollama daemon started successfully (v${data.version || 'running'})`;
+            console.log('[ABAH CHAT] Ollama daemon is active and responding.');
+            return true;
+          }
+        } catch {
+          // retry
+        }
+      }
+    } catch (startErr: any) {
+      console.error('[ABAH CHAT] Failed to spawn Ollama daemon:', startErr.message);
+      ollamaDaemonState.status = 'error';
+      ollamaDaemonState.isStarting = false;
+      ollamaDaemonState.error = startErr.message;
+      ollamaDaemonState.message = 'Failed to launch Ollama daemon process.';
+      return false;
+    }
+
+    ollamaDaemonState.status = 'error';
+    ollamaDaemonState.isStarting = false;
+    ollamaDaemonState.message = 'Ollama process launched but did not respond on port 11434 in time.';
+    return false;
+  } finally {
+    isEnsuringOllama = false;
   }
-  return false;
 }
 
 // 1. Health check
@@ -517,10 +609,20 @@ app.get('/api/health', (req, res) => {
   });
 });
 
+// 1.5 Ollama Daemon Status Endpoint
+app.get('/api/ollama/daemon-status', (req, res) => {
+  res.json(ollamaDaemonState);
+});
+
 // 2. Ollama Status
 app.get('/api/ollama/status', async (req, res) => {
   const result = await fetchOllamaTags(currentOllamaBaseUrl);
   const pulled = getPulledModels();
+  if (result.connected && ollamaDaemonState.status !== 'running') {
+    ollamaDaemonState.status = 'running';
+    ollamaDaemonState.version = result.version;
+    ollamaDaemonState.message = `Ollama active (v${result.version})`;
+  }
   res.json({
     connected: result.connected,
     host: currentOllamaBaseUrl,
@@ -528,6 +630,7 @@ app.get('/api/ollama/status', async (req, res) => {
     installedCount: result.models.length,
     pulledCount: pulled.length,
     installedModels: result.models.map((m) => m.name),
+    daemon: ollamaDaemonState,
     error: result.error,
   });
 });
@@ -1760,13 +1863,15 @@ app.all('/api/search', async (req, res) => {
   }
 });
 
-// 9.5 Shared Chat Parser for OpenAI ChatGPT and Anthropic Claude
+// 9.5 Shared Chat Parser for OpenAI ChatGPT, Anthropic Claude, Perplexity, and others
 function extractSharedChatUrl(text: string): string | null {
   if (!text) return null;
   const match =
-    text.match(/https?:\/\/(?:www\.)?(?:chatgpt\.com|chat\.openai\.com)\/share\/[a-zA-Z0-9_-]+/i) ||
+    text.match(/https?:\/\/(?:www\.)?(?:chatgpt\.com|chat\.openai\.com)\/share(?:\/e)?\/[a-zA-Z0-9_-]+/i) ||
     text.match(/https?:\/\/(?:www\.)?claude\.ai\/share\/[a-zA-Z0-9_-]+/i) ||
-    text.match(/https?:\/\/(?:www\.)?claude\.site\/[a-zA-Z0-9_-]+/i);
+    text.match(/https?:\/\/(?:www\.)?claude\.site\/[a-zA-Z0-9_-]+/i) ||
+    text.match(/https?:\/\/(?:www\.)?perplexity\.ai\/(?:page|search)\/[a-zA-Z0-9_-]+/i) ||
+    text.match(/https?:\/\/v0\.dev\/chat\/[a-zA-Z0-9_-]+/i);
   return match ? match[0] : null;
 }
 
@@ -1774,168 +1879,169 @@ function parseChatGPTShareHtml(html: string, url: string): SharedChatConversatio
   let title = 'Shared ChatGPT Conversation';
   const titleMatch =
     html.match(/<title>ChatGPT\s*-\s*([^<]+)<\/title>/i) ||
+    html.match(/<title>([^<]+)\s*-\s*ChatGPT<\/title>/i) ||
     html.match(/<title>([^<]+)<\/title>/i);
   if (titleMatch) {
     title = titleMatch[1].replace(/\s*-\s*ChatGPT$/i, '').trim();
   }
 
-  const sharedIdMatch = url.match(/\/share\/([a-zA-Z0-9_-]+)/i);
+  const sharedIdMatch = url.match(/\/share(?:\/e)?\/([a-zA-Z0-9_-]+)/i);
   const sharedId = sharedIdMatch ? sharedIdMatch[1] : undefined;
 
-  // 1. React Router Turbo-stream / streamController.enqueue
+  const messages: SharedChatMessage[] = [];
+
+  // Method 1: React Router Turbo-stream / flight data / enqueue
   const scripts = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi)];
-  let streamScript = '';
   for (const s of scripts) {
-    if (s[1].includes('streamController.enqueue') && s[1].includes('linear_conversation')) {
-      streamScript = s[1];
-      break;
-    }
-  }
-
-  if (streamScript) {
-    try {
-      const match = streamScript.match(/enqueue\(([\s\S]*)\)\s*;?\s*$/);
-      if (match) {
-        const outerJson = JSON.parse(match[1]);
-        const data = JSON.parse(outerJson);
-
-        function getString(val: any): string {
-          if (typeof val === 'string') return val;
-          if (typeof val === 'number' && val >= 0 && val < data.length) {
-            return getString(data[val]);
-          }
-          if (Array.isArray(val)) {
-            return val.map(getString).filter(Boolean).join('\n');
-          }
-          return '';
-        }
-
-        function resolveDeep(val: any, depth = 0): any {
-          if (depth > 6 || val === null || val === undefined) return val;
-          if (typeof val === 'number') {
-            if (val >= 0 && val < data.length) return resolveDeep(data[val], depth + 1);
-            return val;
-          }
-          if (Array.isArray(val)) return val.map((x: any) => resolveDeep(x, depth + 1));
-          if (typeof val === 'object') {
-            const res: any = {};
-            for (const [k, v] of Object.entries(val)) {
-              let keyName = k;
-              if (k.startsWith('_')) {
-                const num = parseInt(k.slice(1), 10);
-                if (!isNaN(num) && typeof data[num] === 'string') keyName = data[num];
+    const scriptContent = s[1];
+    if (scriptContent.includes('streamController.enqueue') || scriptContent.includes('linear_conversation')) {
+      try {
+        const match = scriptContent.match(/enqueue\(([\s\S]*)\)\s*;?\s*$/);
+        if (match) {
+          const outerJson = JSON.parse(match[1]);
+          const data = typeof outerJson === 'string' ? JSON.parse(outerJson) : outerJson;
+          if (Array.isArray(data)) {
+            function getString(val: any): string {
+              if (typeof val === 'string') return val;
+              if (typeof val === 'number' && val >= 0 && val < data.length) {
+                return getString(data[val]);
               }
-              res[keyName] = resolveDeep(v, depth + 1);
+              if (Array.isArray(val)) {
+                return val.map(getString).filter(Boolean).join('\n');
+              }
+              return '';
             }
-            return res;
-          }
-          return val;
-        }
 
-        let linearIdx = -1;
-        for (let i = 0; i < data.length; i++) {
-          if (data[i] === 'linear_conversation') {
-            linearIdx = i;
-            break;
-          }
-        }
+            function resolveDeep(val: any, depth = 0): any {
+              if (depth > 6 || val === null || val === undefined) return val;
+              if (typeof val === 'number') {
+                if (val >= 0 && val < data.length) return resolveDeep(data[val], depth + 1);
+                return val;
+              }
+              if (Array.isArray(val)) return val.map((x: any) => resolveDeep(x, depth + 1));
+              if (typeof val === 'object') {
+                const res: any = {};
+                for (const [k, v] of Object.entries(val)) {
+                  let keyName = k;
+                  if (k.startsWith('_')) {
+                    const num = parseInt(k.slice(1), 10);
+                    if (!isNaN(num) && typeof data[num] === 'string') keyName = data[num];
+                  }
+                  res[keyName] = resolveDeep(v, depth + 1);
+                }
+                return res;
+              }
+              return val;
+            }
 
-        let nodeList: any[] = [];
-        if (linearIdx !== -1) {
-          const keyName = `_${linearIdx}`;
-          for (let i = 0; i < data.length; i++) {
-            if (typeof data[i] === 'object' && data[i] !== null && data[i][keyName]) {
-              const ptr = data[i][keyName];
-              if (Array.isArray(data[ptr])) {
-                nodeList = data[ptr];
+            let linearIdx = -1;
+            for (let i = 0; i < data.length; i++) {
+              if (data[i] === 'linear_conversation') {
+                linearIdx = i;
                 break;
               }
             }
-          }
-        }
 
-        // Try extracting high fidelity page title
-        for (let i = 0; i < data.length; i++) {
-          if (data[i] === 'pageTitle' && i + 1 < data.length && typeof data[i + 1] === 'string') {
-            if (data[i + 1] && data[i + 1].trim()) title = data[i + 1].trim();
-          }
-        }
+            let nodeList: any[] = [];
+            if (linearIdx !== -1) {
+              const keyName = `_${linearIdx}`;
+              for (let i = 0; i < data.length; i++) {
+                if (typeof data[i] === 'object' && data[i] !== null && data[i][keyName]) {
+                  const ptr = data[i][keyName];
+                  if (Array.isArray(data[ptr])) {
+                    nodeList = data[ptr];
+                    break;
+                  }
+                }
+              }
+            }
 
-        const messages: SharedChatMessage[] = [];
-        for (const nodeIdx of nodeList) {
-          const node = resolveDeep(data[nodeIdx], 0);
-          if (node && node.message) {
-            const m = node.message;
-            const role = m.author?.role;
-            if (role === 'user' || role === 'assistant') {
-              const text = getString(m.content?.parts);
-              if (text && text.trim()) {
-                messages.push({
-                  id: m.id || `msg-${messages.length}`,
-                  role,
-                  content: text.trim(),
-                  timestamp: m.create_time ? new Date(m.create_time * 1000).toISOString() : undefined,
-                });
+            for (const nodeIdx of nodeList) {
+              const node = resolveDeep(data[nodeIdx], 0);
+              if (node && node.message) {
+                const m = node.message;
+                const role = m.author?.role;
+                if (role === 'user' || role === 'assistant') {
+                  const text = getString(m.content?.parts);
+                  if (text && text.trim()) {
+                    messages.push({
+                      id: m.id || `msg-${messages.length}`,
+                      role,
+                      content: text.trim(),
+                      timestamp: m.create_time ? new Date(m.create_time * 1000).toISOString() : undefined,
+                    });
+                  }
+                }
               }
             }
           }
         }
-
-        if (messages.length > 0) {
-          return {
-            url,
-            provider: 'OpenAI ChatGPT',
-            title,
-            sharedId,
-            messages,
-            turnCount: messages.length,
-            summary: `${messages.length} conversational turns extracted from ChatGPT share`,
-            fetchedAt: new Date().toISOString(),
-          };
-        }
+      } catch (err: any) {
+        // Continue to other strategies
       }
-    } catch (err: any) {
-      console.warn('Error parsing ChatGPT stream script:', err.message);
     }
   }
 
-  // 2. Fallback: Parse from __NEXT_DATA__ or any embedded JSON scripts
-  for (const s of scripts) {
-    if (s[1].includes('"mapping"') || s[1].includes('"current_node"')) {
-      try {
-        const parsed = JSON.parse(s[1]);
-        const conv = parsed.props?.pageProps?.serverResponse?.data || parsed;
-        if (conv.mapping) {
-          const msgs: SharedChatMessage[] = [];
-          for (const node of Object.values<any>(conv.mapping)) {
-            const m = node.message;
-            if (m && (m.author?.role === 'user' || m.author?.role === 'assistant')) {
-              const parts = m.content?.parts;
-              const text = Array.isArray(parts) ? parts.join('\n') : (typeof parts === 'string' ? parts : '');
-              if (text.trim()) {
-                msgs.push({
-                  id: m.id,
-                  role: m.author.role,
-                  content: text.trim(),
-                  timestamp: m.create_time ? new Date(m.create_time * 1000).toISOString() : undefined,
-                });
+  // Method 2: Next.js __NEXT_DATA__
+  if (messages.length === 0) {
+    for (const s of scripts) {
+      if (s[1].includes('"mapping"') || s[1].includes('"serverResponse"')) {
+        try {
+          const parsed = JSON.parse(s[1]);
+          const conv = parsed.props?.pageProps?.serverResponse?.data || parsed;
+          if (conv && conv.mapping) {
+            for (const node of Object.values<any>(conv.mapping)) {
+              const m = node.message;
+              if (m && (m.author?.role === 'user' || m.author?.role === 'assistant')) {
+                const parts = m.content?.parts;
+                const text = Array.isArray(parts) ? parts.join('\n') : (typeof parts === 'string' ? parts : '');
+                if (text && text.trim()) {
+                  messages.push({
+                    id: m.id || `msg-${messages.length}`,
+                    role: m.author.role,
+                    content: text.trim(),
+                    timestamp: m.create_time ? new Date(m.create_time * 1000).toISOString() : undefined,
+                  });
+                }
               }
             }
           }
-          if (msgs.length > 0) {
-            return {
-              url,
-              provider: 'OpenAI ChatGPT',
-              title: conv.title || title,
-              sharedId,
-              messages: msgs,
-              turnCount: msgs.length,
-              summary: `${msgs.length} messages extracted from ChatGPT share`,
-              fetchedAt: new Date().toISOString(),
-            };
-          }
-        }
-      } catch {}
+        } catch {}
+      }
+    }
+  }
+
+  // Method 3: Direct HTML role extraction (<div data-message-author-role="user|assistant">)
+  if (messages.length === 0) {
+    const roleBlocks = [
+      ...html.matchAll(/<div[^>]*data-message-author-role="([^"]+)"[^>]*>([\s\S]*?)<\/div>(?=\s*<div[^>]*data-message-author-role=|$)/gi),
+    ];
+    for (const block of roleBlocks) {
+      const rawRole = block[1].toLowerCase();
+      const role = rawRole === 'user' ? 'user' : 'assistant';
+      const cleanText = decodeHtmlEntities(block[2].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+      if (cleanText.length > 0) {
+        messages.push({
+          id: `html-${messages.length}`,
+          role,
+          content: cleanText,
+        });
+      }
+    }
+  }
+
+  // Method 4: Markdown or whitespace-pre-wrap containers
+  if (messages.length === 0) {
+    const textBlocks = [...html.matchAll(/<div[^>]*class="[^"]*(?:markdown|whitespace-pre-wrap)[^"]*"[^>]*>([\s\S]*?)<\/div>/gi)];
+    for (let i = 0; i < textBlocks.length; i++) {
+      const clean = decodeHtmlEntities(textBlocks[i][1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+      if (clean.length > 5) {
+        messages.push({
+          id: `chunk-${i}`,
+          role: i % 2 === 0 ? 'user' : 'assistant',
+          content: clean,
+        });
+      }
     }
   }
 
@@ -1944,9 +2050,12 @@ function parseChatGPTShareHtml(html: string, url: string): SharedChatConversatio
     provider: 'OpenAI ChatGPT',
     title,
     sharedId,
-    messages: [],
-    turnCount: 0,
-    summary: 'Unable to extract messages from link',
+    messages,
+    turnCount: messages.length,
+    summary:
+      messages.length > 0
+        ? `${messages.length} conversational turns extracted from ChatGPT share`
+        : 'Unable to extract messages automatically from this link (the share page may require manual transcript paste).',
     fetchedAt: new Date().toISOString(),
   };
 }
@@ -1955,6 +2064,7 @@ function parseClaudeShareHtml(html: string, url: string): SharedChatConversation
   let title = 'Shared Claude Conversation';
   const titleMatch =
     html.match(/<title>Claude\s*-\s*([^<]+)<\/title>/i) ||
+    html.match(/<title>([^<]+)\s*-\s*Claude<\/title>/i) ||
     html.match(/<title>([^<]+)<\/title>/i);
   if (titleMatch) {
     title = titleMatch[1].replace(/\s*-\s*Claude$/i, '').trim();
@@ -1964,6 +2074,7 @@ function parseClaudeShareHtml(html: string, url: string): SharedChatConversation
   const sharedId = sharedIdMatch ? sharedIdMatch[1] : undefined;
 
   const scripts = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi)];
+  const messages: SharedChatMessage[] = [];
 
   // 1. Next.js __NEXT_DATA__
   for (const s of scripts) {
@@ -1977,36 +2088,27 @@ function parseClaudeShareHtml(html: string, url: string): SharedChatConversation
 
         const chatMessages = conversation.chat_messages || conversation.messages || [];
         if (Array.isArray(chatMessages) && chatMessages.length > 0) {
-          const messages: SharedChatMessage[] = chatMessages
-            .map((m: any, idx: number) => {
-              const role = m.sender === 'human' || m.role === 'user' ? 'user' : 'assistant';
-              const text =
-                m.text ||
-                (Array.isArray(m.content)
-                  ? m.content.map((c: any) => c.text || '').join('\n')
-                  : typeof m.content === 'string'
-                  ? m.content
-                  : '');
-              return {
+          for (let idx = 0; idx < chatMessages.length; idx++) {
+            const m = chatMessages[idx];
+            const role = m.sender === 'human' || m.role === 'user' ? 'user' : 'assistant';
+            const text =
+              m.text ||
+              (Array.isArray(m.content)
+                ? m.content.map((c: any) => c.text || '').join('\n')
+                : typeof m.content === 'string'
+                ? m.content
+                : '');
+            if (text && text.trim()) {
+              messages.push({
                 id: m.uuid || m.id || `claude-msg-${idx}`,
                 role,
                 content: text.trim(),
                 timestamp: m.created_at || m.updated_at,
-              };
-            })
-            .filter((m: any) => Boolean(m.content));
-
-          if (messages.length > 0) {
-            return {
-              url,
-              provider: 'Anthropic Claude',
-              title: conversation.name || conversation.title || title,
-              sharedId,
-              messages,
-              turnCount: messages.length,
-              summary: `${messages.length} conversational turns extracted from Claude share`,
-              fetchedAt: new Date().toISOString(),
-            };
+              });
+            }
+          }
+          if (conversation.name || conversation.title) {
+            title = conversation.name || conversation.title;
           }
         }
       } catch {}
@@ -2014,21 +2116,22 @@ function parseClaudeShareHtml(html: string, url: string): SharedChatConversation
   }
 
   // 2. Claude HTML fallback parsing
-  const messages: SharedChatMessage[] = [];
-  const turnBlocks = [
-    ...html.matchAll(
-      /<(?:div|article)[^>]*(?:data-testid="[^"]*(?:message|turn)[^"]*"|class="[^"]*(?:font-claude-message|human-message)[^"]*")[^>]*>([\s\S]*?)<\/(?:div|article)>/gi
-    ),
-  ];
-  for (const block of turnBlocks) {
-    const isHuman = block[0].includes('human') || block[0].includes('user');
-    const cleanText = block[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-    if (cleanText.length > 10) {
-      messages.push({
-        id: `turn-${messages.length}`,
-        role: isHuman ? 'user' : 'assistant',
-        content: cleanText,
-      });
+  if (messages.length === 0) {
+    const turnBlocks = [
+      ...html.matchAll(
+        /<(?:div|article)[^>]*(?:data-testid="[^"]*(?:message|turn)[^"]*"|class="[^"]*(?:font-claude-message|human-message)[^"]*")[^>]*>([\s\S]*?)<\/(?:div|article)>/gi
+      ),
+    ];
+    for (const block of turnBlocks) {
+      const isHuman = block[0].includes('human') || block[0].includes('user');
+      const cleanText = decodeHtmlEntities(block[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim());
+      if (cleanText.length > 5) {
+        messages.push({
+          id: `turn-${messages.length}`,
+          role: isHuman ? 'user' : 'assistant',
+          content: cleanText,
+        });
+      }
     }
   }
 
@@ -2039,7 +2142,162 @@ function parseClaudeShareHtml(html: string, url: string): SharedChatConversation
     sharedId,
     messages,
     turnCount: messages.length,
-    summary: `${messages.length} conversational turns extracted from Claude share`,
+    summary:
+      messages.length > 0
+        ? `${messages.length} conversational turns extracted from Claude share`
+        : 'Unable to extract messages automatically from this link.',
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
+function parsePerplexityShareHtml(html: string, url: string): SharedChatConversation {
+  let title = 'Shared Perplexity Search';
+  const titleMatch = html.match(/<title>([^<]+)<\/title>/i);
+  if (titleMatch) {
+    title = titleMatch[1].replace(/\s*-\s*Perplexity$/i, '').trim();
+  }
+
+  const messages: SharedChatMessage[] = [];
+  const queryMatch = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
+  if (queryMatch) {
+    const userQuery = decodeHtmlEntities(queryMatch[1].replace(/<[^>]+>/g, ' ').trim());
+    if (userQuery) {
+      messages.push({
+        id: 'perp-q',
+        role: 'user',
+        content: userQuery,
+      });
+    }
+  }
+
+  // Answer text
+  const answerMatch = html.match(/<div[^>]*class="[^"]*prose[^"]*"[^>]*>([\s\S]*?)<\/div>/i);
+  if (answerMatch) {
+    const cleanAnswer = decodeHtmlEntities(answerMatch[1].replace(/<[^>]+>/g, ' ').trim());
+    if (cleanAnswer) {
+      messages.push({
+        id: 'perp-a',
+        role: 'assistant',
+        content: cleanAnswer,
+      });
+    }
+  }
+
+  return {
+    url,
+    provider: 'Perplexity AI',
+    title,
+    messages,
+    turnCount: messages.length,
+    summary: `${messages.length} turns extracted from Perplexity share`,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
+// Universal parser for pasted text or JSON transcript
+function parseSharedChatFromText(rawText: string, customTitle?: string): SharedChatConversation {
+  const text = rawText.trim();
+  const messages: SharedChatMessage[] = [];
+
+  // Strategy 1: JSON export format
+  try {
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) {
+      for (let i = 0; i < parsed.length; i++) {
+        const item = parsed[i];
+        const content = item.content || item.text || item.message;
+        if (content) {
+          const role = item.role === 'assistant' || item.source === 'chatter' ? 'assistant' : 'user';
+          messages.push({
+            id: item.id || `msg-${i}`,
+            role,
+            content: String(content).trim(),
+            timestamp: item.timestamp,
+          });
+        }
+      }
+    } else if (parsed && typeof parsed === 'object') {
+      const msgList = parsed.messages || parsed.chat_messages || parsed.history;
+      if (Array.isArray(msgList)) {
+        for (let i = 0; i < msgList.length; i++) {
+          const item = msgList[i];
+          const content = item.content || item.text || (item.parts ? item.parts.join('\n') : null);
+          if (content) {
+            const role = item.role === 'assistant' || item.sender === 'assistant' ? 'assistant' : 'user';
+            messages.push({
+              id: item.id || `msg-${i}`,
+              role,
+              content: String(content).trim(),
+              timestamp: item.timestamp || item.created_at,
+            });
+          }
+        }
+      }
+    }
+  } catch {
+    // Not valid JSON, continue with text regex
+  }
+
+  // Strategy 2: Text transcript with speaker labels
+  if (messages.length === 0) {
+    const lines = text.split('\n');
+    let currentRole: 'user' | 'assistant' = 'user';
+    let currentContent: string[] = [];
+
+    const labelRegex = /^(?:\[?(User|Human|You|Question)\]?[:：]|\[?(Assistant|ChatGPT|Claude|Perplexity|Gemini|Answer|Bot)\]?[:：])\s*(.*)$/i;
+
+    for (const line of lines) {
+      const match = line.match(labelRegex);
+      if (match) {
+        if (currentContent.length > 0) {
+          const contentStr = currentContent.join('\n').trim();
+          if (contentStr) {
+            messages.push({
+              id: `turn-${messages.length}`,
+              role: currentRole,
+              content: contentStr,
+            });
+          }
+          currentContent = [];
+        }
+        const speaker = (match[1] || match[2] || '').toLowerCase();
+        currentRole = speaker.includes('user') || speaker.includes('human') || speaker.includes('you') || speaker.includes('question') ? 'user' : 'assistant';
+        if (match[3] && match[3].trim()) {
+          currentContent.push(match[3].trim());
+        }
+      } else {
+        currentContent.push(line);
+      }
+    }
+
+    if (currentContent.length > 0) {
+      const contentStr = currentContent.join('\n').trim();
+      if (contentStr) {
+        messages.push({
+          id: `turn-${messages.length}`,
+          role: currentRole,
+          content: contentStr,
+        });
+      }
+    }
+  }
+
+  // Strategy 3: Fallback - single turn
+  if (messages.length === 0 && text.length > 0) {
+    messages.push({
+      id: 'turn-0',
+      role: 'user',
+      content: text,
+    });
+  }
+
+  return {
+    url: 'pasted://transcript',
+    provider: 'Shared AI Chat',
+    title: customTitle || 'Pasted Conversation Transcript',
+    messages,
+    turnCount: messages.length,
+    summary: `${messages.length} messages extracted from pasted transcript`,
     fetchedAt: new Date().toISOString(),
   };
 }
@@ -2048,6 +2306,7 @@ async function fetchAndParseSharedChat(targetUrl: string): Promise<SharedChatCon
   const cleanUrl = targetUrl.trim();
   const isClaude = cleanUrl.includes('claude.ai') || cleanUrl.includes('claude.site');
   const isOpenAI = cleanUrl.includes('chatgpt.com') || cleanUrl.includes('chat.openai.com');
+  const isPerplexity = cleanUrl.includes('perplexity.ai');
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 12000);
@@ -2066,7 +2325,7 @@ async function fetchAndParseSharedChat(targetUrl: string): Promise<SharedChatCon
   clearTimeout(timeoutId);
 
   if (!res.ok) {
-    throw new Error(`Failed to fetch shared chat from ${cleanUrl} (HTTP ${res.status})`);
+    throw new Error(`Failed to fetch shared chat from ${cleanUrl} (HTTP ${res.status}). If link is protected, you can paste the text directly into the modal.`);
   }
 
   const html = await res.text();
@@ -2075,10 +2334,14 @@ async function fetchAndParseSharedChat(targetUrl: string): Promise<SharedChatCon
     return parseChatGPTShareHtml(html, cleanUrl);
   } else if (isClaude) {
     return parseClaudeShareHtml(html, cleanUrl);
+  } else if (isPerplexity) {
+    return parsePerplexityShareHtml(html, cleanUrl);
   } else {
     const openAiAttempt = parseChatGPTShareHtml(html, cleanUrl);
     if (openAiAttempt.messages.length > 0) return openAiAttempt;
-    return parseClaudeShareHtml(html, cleanUrl);
+    const claudeAttempt = parseClaudeShareHtml(html, cleanUrl);
+    if (claudeAttempt.messages.length > 0) return claudeAttempt;
+    return parsePerplexityShareHtml(html, cleanUrl);
   }
 }
 
@@ -2094,6 +2357,21 @@ app.post('/api/shared-chat/fetch', async (req, res) => {
   } catch (err: any) {
     console.error('[ABAH CHAT] Error in /api/shared-chat/fetch:', err);
     res.status(500).json({ error: err.message || 'Failed to fetch shared chat' });
+  }
+});
+
+// Endpoint to parse raw shared chat text or transcript directly
+app.post('/api/shared-chat/parse-text', (req, res) => {
+  try {
+    const { text, title } = req.body;
+    if (!text || typeof text !== 'string' || !text.trim()) {
+      return res.status(400).json({ error: 'Conversation text or transcript is required' });
+    }
+    const conversation = parseSharedChatFromText(text, title);
+    res.json({ success: true, conversation });
+  } catch (err: any) {
+    console.error('[ABAH CHAT] Error in /api/shared-chat/parse-text:', err);
+    res.status(500).json({ error: err.message || 'Failed to parse conversation text' });
   }
 });
 
@@ -2136,7 +2414,6 @@ app.post('/api/chat', async (req, res) => {
   try {
     const {
       message,
-      model = 'gemma2:2b',
       attachments,
       webSearch,
       sharedChat,
@@ -2144,12 +2421,27 @@ app.post('/api/chat', async (req, res) => {
       clientTimeZone,
     } = req.body;
 
+    // Dynamically resolve model: never hardcode default model!
+    let model = (typeof req.body.model === 'string' ? req.body.model.trim() : '');
+    if (!model) {
+      const pulled = getPulledModels();
+      if (pulled.length > 0) {
+        model = pulled[0].id;
+      }
+    }
+
     if (
       (!message || typeof message !== 'string') &&
       (!attachments || attachments.length === 0) &&
       !sharedChat
     ) {
       return res.status(400).json({ error: 'Message, file attachments, or shared chat are required' });
+    }
+
+    if (!model) {
+      return res.status(400).json({
+        error: 'No Ollama model is currently selected or pulled. Please open the Model Selector at the top to choose and pull a model first.',
+      });
     }
 
     const effectiveMessage =
@@ -2564,8 +2856,11 @@ ${temporalInfo.targetLocation ? `• Target Location Time (${temporalInfo.target
 });
 
 async function startServer() {
-  // Automatically ensure local Ollama daemon is started if installed
-  ensureOllamaDaemon().catch((e) => console.warn('[ABAH CHAT] Ollama autostart check:', e.message));
+  // Automatically ensure local Ollama is downloaded if missing or started if present
+  // Runs in the background so it never blocks or crashes Express server startup
+  ensureOllamaInstalledAndRunning().catch((e) =>
+    console.warn('[ABAH CHAT] Ollama startup/download background task notice:', e.message)
+  );
 
   // Vite middleware for dev or static serving for production
   if (process.env.NODE_ENV !== 'production') {

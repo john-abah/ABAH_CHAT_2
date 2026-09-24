@@ -55,10 +55,12 @@ export const ChatInput: React.FC<ChatInputProps> = ({
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
-  // Check if current text contains an OpenAI or Claude share link
-  const detectedSharedUrlMatch = text.match(
-    /https?:\/\/(?:www\.)?(?:chatgpt\.com|chat\.openai\.com)\/share\/[a-zA-Z0-9_-]+/i
-  ) || text.match(/https?:\/\/(?:www\.)?claude\.ai\/share\/[a-zA-Z0-9_-]+/i) || text.match(/https?:\/\/(?:www\.)?claude\.site\/[a-zA-Z0-9_-]+/i);
+  // Check if current text contains an OpenAI, Claude, or Perplexity share link
+  const detectedSharedUrlMatch =
+    text.match(/https?:\/\/(?:www\.)?(?:chatgpt\.com|chat\.openai\.com)\/share\/[a-zA-Z0-9_-]+/i) ||
+    text.match(/https?:\/\/(?:www\.)?claude\.ai\/share\/[a-zA-Z0-9_-]+/i) ||
+    text.match(/https?:\/\/(?:www\.)?claude\.site\/[a-zA-Z0-9_-]+/i) ||
+    text.match(/https?:\/\/(?:www\.)?perplexity\.ai\/search\/[a-zA-Z0-9._-]+/i);
   const detectedUrl = detectedSharedUrlMatch ? detectedSharedUrlMatch[0] : null;
 
   const processFile = async (file: File): Promise<ChatAttachment> => {

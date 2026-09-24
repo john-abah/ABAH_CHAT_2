@@ -463,11 +463,17 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
         loadPulledModels();
         loadOnlineModels();
 
-        // If the active model was deleted, switch to fallback
+        // If the active model was deleted, switch to fallback or clear
         if (selectedModelId.toLowerCase() === targetModel.toLowerCase()) {
-          onSelectModel('gemma2:2b');
+          const remaining = pulledModels.filter(
+            (m) => m.id.toLowerCase() !== targetModel.toLowerCase()
+          );
+          const nextModel = remaining.length > 0 ? remaining[0].id : '';
+          onSelectModel(nextModel);
           setNotification({
-            text: `Deleted active model "${targetModel}". Switched active chatter to gemma2:2b.`,
+            text: nextModel
+              ? `Deleted model "${targetModel}". Active model set to "${nextModel}".`
+              : `Deleted model "${targetModel}". No pulled models remain.`,
           });
         }
       } else {
@@ -840,7 +846,9 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
                         </span>
                       </div>
                       <p className="text-xs text-zinc-300 mt-1 font-medium">
-                        {pull.status}
+                        {isDone
+                          ? '🎉 Model download is 100% complete and verified! You can now select this model and start chatting.'
+                          : `⏳ Please wait while downloading... (${pull.status || 'Downloading model layers'})`}
                       </p>
                     </div>
                   </div>
@@ -912,8 +920,8 @@ export const OllamaModelPicker: React.FC<OllamaModelPickerProps> = ({
                   <div className="flex items-center justify-between text-[11px] text-zinc-400 pt-0.5">
                     <span>
                       {isDone
-                        ? 'Model weights are permanently saved. You can exit this loading section anytime.'
-                        : 'Watching live download progression. The screen will not change.'}
+                        ? '🎉 Download Complete! Model weights are saved and ready for conversation.'
+                        : '⏳ Downloading in progress... Please wait until the download finishes. Do not close.'}
                     </span>
                     <span className="font-mono text-zinc-400 text-[10px]">
                       {isDone ? 'STATUS: VERIFIED (100%)' : 'STATUS: STREAMING (OLLAMA)'}

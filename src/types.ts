@@ -114,6 +114,14 @@ export interface OllamaStatus {
   version: string | null;
   installedCount: number;
   pulledCount?: number;
+  daemon?: {
+    status: 'idle' | 'checking' | 'downloading' | 'starting' | 'running' | 'error';
+    message: string;
+    version: string | null;
+    isDownloading?: boolean;
+    isStarting?: boolean;
+    error?: string;
+  };
   error?: string | null;
 }
 

@@ -19,7 +19,7 @@ interface HeaderProps {
 export const Header: React.FC<HeaderProps> = ({
   messageCount,
   selectedModelId,
-  pulledCount = 1,
+  pulledCount = 0,
   ollamaStatus,
   onOpenModelPicker,
   onOpenSettings,
@@ -79,9 +79,15 @@ export const Header: React.FC<HeaderProps> = ({
             <Cpu className="w-3.5 h-3.5 text-amber-400 shrink-0 group-hover:scale-110 transition-transform" />
             <div className="flex items-center gap-1.5 font-medium">
               <span className="text-zinc-400 text-[11px] hidden sm:inline">Active:</span>
-              <span className="font-mono text-zinc-100 bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800 text-[11px]">
-                {selectedModelId}
-              </span>
+              {selectedModelId ? (
+                <span className="font-mono text-zinc-100 bg-zinc-900 px-2 py-0.5 rounded border border-zinc-800 text-[11px]">
+                  {selectedModelId}
+                </span>
+              ) : (
+                <span className="font-mono text-amber-300 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800/80 text-[11px] animate-pulse">
+                  Select / Pull Model
+                </span>
+              )}
             </div>
             <span className="text-[11px] text-indigo-300 font-medium bg-indigo-950/70 hover:bg-indigo-900/80 px-2 py-0.5 rounded-lg border border-indigo-700/60 flex items-center gap-1">
               <Globe className="w-3 h-3 text-indigo-400" />

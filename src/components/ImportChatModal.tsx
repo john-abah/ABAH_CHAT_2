@@ -431,19 +431,11 @@ export const ImportChatModal: React.FC<ImportChatModalProps> = ({
               <div className="flex items-center justify-between text-[11px] text-zinc-500">
                 <span className="flex items-center gap-1">
                   <Sparkles className="w-3 h-3 text-amber-400" />
-                  <span>Directly inlines dialogue into persistent memory</span>
+                  <span>Directly inlines dialogue turns into persistent memory</span>
                 </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    const sample = 'https://chatgpt.com/share/6ab2387e-4aa0-83eb-b566-41c2a6696548';
-                    setSharedUrl(sample);
-                    handleFetchSharedUrl(sample);
-                  }}
-                  className="text-blue-400 hover:text-blue-300 underline"
-                >
-                  Use sample link (Wohnungsanfrage)
-                </button>
+                <span className="text-zinc-500 font-mono text-[10px]">
+                  ChatGPT &bull; Claude &bull; Perplexity
+                </span>
               </div>
             </div>
           )}
